@@ -122,6 +122,7 @@ SRCS_3 = std\variant.d \
 	std\stream.d std\socket.d std\socketstream.d \
 	std\perf.d std\container.d std\conv.d \
 	std\zip.d std\cstream.d std\loader.d \
+	std\logging.d \
 	std\__fileinit.d \
 	std\datebase.d \
 	std\regex.d \
@@ -260,7 +261,7 @@ SRC_STD= std\zlib.d std\zip.d std\stdint.d std\container.d std\conv.d std\utf.d 
 	std\syserror.d \
 	std\regexp.d std\random.d std\stream.d std\process.d \
 	std\socket.d std\socketstream.d std\loader.d std\stdarg.d std\format.d \
-	std\stdio.d std\perf.d std\uni.d \
+	std\logging.d std\stdio.d std\perf.d std\uni.d \
 	std\cstream.d std\demangle.d \
 	std\signals.d std\cpuid.d std\typetuple.d std\traits.d std\bind.d \
 	std\metastrings.d std\contracts.d std\getopt.d \
@@ -450,6 +451,9 @@ json.obj : std\json.d
 
 loader.obj : std\loader.d
 	$(DMD) -c $(DFLAGS) std\loader.d
+
+logging.obj : std\logging.d
+	$(DMD) -c $(DFLAGS) std\logging.d
 
 math.obj : std\math.d
 	$(DMD) -c $(DFLAGS) std\math.d
@@ -749,6 +753,9 @@ $(DOC)\std_gregorian.html : $(STDDOC) std\gregorian.d
 
 $(DOC)\std_json.html : $(STDDOC) std\json.d
 	$(DMD) -c -o- $(DFLAGS) -Df$(DOC)\std_json.html $(STDDOC) std\json.d
+
+$(DOC)\std_logging.html : $(STDDOC) std\logging.d
+	$(DMD) -c -o- $(DFLAGS) -Df$(DOC)\std_logging.html $(STDDOC) std\logging.d
 
 $(DOC)\std_math.html : $(STDDOC) std\math.d
 	$(DMD) -c -o- $(DFLAGS) -Df$(DOC)\std_math.html $(STDDOC) std\math.d
