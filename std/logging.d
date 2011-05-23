@@ -11,42 +11,42 @@ import std.logging;
 
 int main(string[] args)
 {
-   initializeLogging(SharedLogger.getCreator(args[0]));
+   initLogging(SharedLogger.getCreator(args[0]));
 
-   log!info.format("You passed %s argument(s)", args.length - 1);
-   log!info(args.length > 1).write("Arguments: ", args[1 .. $]);
+   info.format("You passed %s argument(s)", args.length - 1);
+   info.when(args.length > 1)("Arguments: ", args[1 .. $]);
 
-   log!info.write("This is an info message.");
-   log!warning.write("This is a warning message.");
-   log!error.write("This is an error message!");
-   log!fatal.write("This is a fatal message");
+   info("This is an info message.");
+   warning("This is a warning message.");
+   error("This is an error message!");
+   dfatal("This is a debug fatal message");
 
-   vlog(0).write("Verbosity 0 message");
-   vlog(1).write("Verbosity 1 message");
-   vlog(2).write("Verbosity 2 message");
+   vlog(0)("Verbosity 0 message");
+   vlog(1)("Verbosity 1 message");
+   vlog(2)("Verbosity 2 message");
 
    foreach (i; 0 .. 10)
    {
-      log!info(every(9)).write("Every nine");
+      info.when(every(9))("Every nine");
  
-      auto logger = log!info;
+      auto logger = info;
       if(logger.willLog)
       {
          auto message = "Cool message";
          // perform some complex operation
          // ...
-         logger.write(message);
+         logger(message);
       }
 
-      vlog(2, first).write("Verbose message only on the first iterations");
+      vlog(2).when(first)("Verbose message only on the first iterations");
    }
 
-   log!fatal.write("This is a fatal message!!!");
+   fatal("This is a fatal message!!!");
 }
 ---
 
 Note:
-Compile time disabling of severity levels can be done by defining the LOGGING_FATAL_DISABLED, LOGGING_ERROR_DISABLED, LOGGING_WARNING_DISABLED or LOGGING_INFO_DISABLED version. Disabiliting a higher serveirty level will disable all the lower severity level. E.g. LOGGING_WARNING_DISABLED will disable warning and info serverity levels at compile time and enable the fatal and error serverity level.
+Compile time disabling of severity levels can be done by defining the LOGGING_FATAL_DISABLED, LOGGING_ERROR_DISABLED, LOGGING_WARNING_DISABLED or LOGGING_INFO_DISABLED version. Disabiliting a higher severity level will disable all the lower severity level. E.g. LOGGING_WARNING_DISABLED will disable warning and info serverity levels at compile time and enable the fatal and error serverity level.
 
 Verbose messages are logged at the info severity level so using LOGGING_INFO_DISABLED will also disable versbose messages.
 
@@ -57,25 +57,20 @@ module std.logging;
 
 import core.atomic : cas;
 import core.sync.mutex : Mutex;
-import std.stdio : File, write, writefln;
+import std.stdio : File, writefln;
 import std.string : newline;
 import std.conv : text, to;
 import std.datetime: Clock, DateTime;
 import std.exception : enforce;
-import std.concurrency : spawn,
-                         Tid,
-                         send,
-                         receive,
-                         OwnerTerminated,
-                         thisTid,
-                         receiveOnly;
-import std.traits : EnumMembers;
-import std.array : appender, array, replicate;
+import std.getopt : getopt;
+import std.process : getenv;
+import std.array : Appender, appender, array;
 import std.format : formattedWrite;
-import std.algorithm : endsWith, startsWith, splitter;
+import std.algorithm : endsWith, startsWith, splitter, swap;
 
 version(unittest)
 {
+   import std.array : replicate;
    import std.file : remove;
    import core.exception : AssertError;
 }
@@ -85,38 +80,30 @@ Defines the severity levels supported by the logging library.
 
 Logging messages of severity level fatal will also cause the program to halt. The dfatal severity will log at a fatal severity in debug mode and at a error severity in release mode.
 +/
-enum fatal = 0;
-enum error = 1; /// ditto
-enum warning = 2; /// ditto
-enum info = 3; /// ditto
-debug alias fatal dfatal; /// ditto
-else alias error dfatal; /// ditto
-
-private enum levelMax = 4;
+enum Severity
+{
+   fatal = 0,
+   error,
+   warning,
+   info
+}
 
 immutable string[] severityNames = [ "FATAL", "ERROR", "WARNING", "INFO" ];
 
-// Set the compile time level for compile time filtering
-version(LOGGING_FATAL_DISABLED)
-{
-   private enum compiledLevel = -1;
-}
-else version(LOGGING_ERROR_DISABLED)
-{
-   private enum compiledLevel = fatal;
-}
-else version(LOGGING_WARNING_DISABLED)
-{
-   private enum compiledLevel = error;
-}
-else version(LOGGING_INFO_DISABLED)
-{
-   private enum compiledLevel = warning;
-}
-else
-{
-   private enum compiledLevel = info;
-}
+version(strip_log_fatal) NoopLogger fatal;
+else DefaultLogger fatal;
+
+version(strip_log_error) NoopLogger error;
+else typeof(fatal) error;
+
+version(strip_log_warning) NoopLogger warning;
+else typeof(error) warning;
+
+version(strip_log_info) NoopLogger info;
+else typeof(warning) info;
+
+debug alias fatal dfatal;
+else alias error dfatal;
 
 /++
 Initializes the logging infrastructure.
@@ -125,22 +112,32 @@ This function must be called once before calling any of the logging functions.
 
 Params:
    logCreator = Delegate which creates the Logger used by the module.
-   logConfig = Module configuration object. 
+   filterConfig = Module configuration object. 
 
 See_Also:
-   LogConfig
+   FilterConfig
 +/
-// XXX fix the API so that most user don't need to know about ActorLogger
-void initializeLogging(shared(Logger) delegate() logCreator,
-                       LogConfig logConfig = LogConfig())
+// XXX fix the API so that user doesn't need to init 
+void initLogging(ref string[] commandLine)
 {
-   _internal.init(logCreator, logConfig);
+   auto filterConfig = FilterConfig.create(commandLine);
+   auto loggerConfig = LoggerConfig.create(commandLine);
+
+   initializeLogging!SharedLogger(loggerConfig, filterConfig);
+}
+
+void initializeLogging(T : Logger, BC)
+                      (BC loggerConfig,
+                       FilterConfig filterConfig = FilterConfig())
+{
+   auto logger = new T(loggerConfig);
+   _moduleConfig.init(logger, filterConfig);
 }
 
 /++
 Logs a message.
 
-Returns a structure for logging messages at the specified level.
+Returns a structure for logging messages at the specified severity.
 Example:
 ---
    log!error.write("Log an ", severityNames[error], " message!");
@@ -149,6 +146,8 @@ Example:
 
 You can also performed conditional logging.
 Example:
+
+
 ---
    void coolFunction(Object object)
    {
@@ -179,22 +178,6 @@ Example:
 ---
 
 +/
-auto log(int level)
-        (lazy bool now = true,
-         string file = __FILE__,
-         int line = __LINE__)
-{
-   static assert(level >= fatal && level < levelMax);
-
-   static if(level <= compiledLevel)
-   {
-      return _internal.getLog(file, line, level, now);
-   }
-   else
-   {
-      return NoopLogged.init;
-   }
-}
 
 /++
 Logs a verbose message.
@@ -231,30 +214,306 @@ Example:
    }
 ---
 +/
-auto vlog(uint level,
-          lazy bool now = true,
-          string file = __FILE__,
-          int line = __LINE__)
+
+static if(is(typeof(info) == NoopLogger))
 {
-   static if(info <= compiledLevel)
+   ref NoopLogger vlog(short level,
+                       string file = __FILE__)
    {
-      return _internal.getVlog(file, line, level, now);
+      return info;
    }
-   else
+}
+else
+{
+   VerboseLogger vlog(short level,
+                      string file = __FILE__)
    {
-      return NoopLogged.init;
+      return VerboseLogger.create(level, _moduleConfig, &info, file);
    }
 }
 
-/++
-Returned by the log and vlog functions.
-+/
-struct Logged
+struct NoopLogger
 {
+   @property bool willLog() const { return false; }
+
+   ref NoopLogger when(lazy bool now) { return this; }
+   void opCall(T...)(lazy T args) {}
+   alias opCall write;
+   void format(T...)(lazy string fmt, lazy T args) {}
+}
+
+unittest
+{
+   // assert default values
+   FilterConfig filterConfig;
+   assert(filterConfig._maxSeverity == Severity.error);
+   assert(filterConfig._maxVerboseLevel == short.min);
+   assert(filterConfig._vModuleConfigs == null);
+
+   auto name = "program_name";
+   auto args = [name,
+                "--" ~ FilterConfig.maxSeverityFlag, "info",
+                "--" ~ FilterConfig.verboseModuleFlag, "*logging=2,module=0",
+                "--" ~ FilterConfig.maxVerboseLevelFlag, "2",
+                "--ignoredOption"];
+               
+   filterConfig = FilterConfig.create(args);
+
+   // assert that all expected options where removed
+   assert(args.length == 2);
+   assert(args[0] == name);
+
+   assert(filterConfig._maxSeverity == Severity.info);
+   assert(filterConfig._maxVerboseLevel == 2);
+
+   // assert VModuleConfig entries
+   assert(filterConfig._vModuleConfigs.length == 2);
+
+   assert(filterConfig._vModuleConfigs[0]._pattern == "logging");
+   assert(filterConfig._vModuleConfigs[0]._matching ==
+          VModuleConfig.Matching.endsWith);
+   assert(filterConfig._vModuleConfigs[0]._level == 2);
+
+   assert(filterConfig._vModuleConfigs[1]._pattern == "module");
+   assert(filterConfig._vModuleConfigs[1]._matching ==
+          VModuleConfig.Matching.equals);
+   assert(filterConfig._vModuleConfigs[1]._level == 0);
+
+   // this(this)
+   auto tempFilter = filterConfig;
+   assert(tempFilter._vModuleConfigs == filterConfig._vModuleConfigs);
+   assert(tempFilter._vModuleConfigs !is filterConfig._vModuleConfigs);
+
+   // opAssign
+   tempFilter = filterConfig;
+   assert(tempFilter._vModuleConfigs == filterConfig._vModuleConfigs);
+   assert(tempFilter._vModuleConfigs !is filterConfig._vModuleConfigs);
+}
+
+/++
+Configuration struct for the module.
+
+This object must be used to configure the logging module at initialization.  All the properties are optional and can be use to configure the framework's behavior.
++/
+struct FilterConfig
+{
+   static string maxSeverityFlag = "maxloglevel";
+   static string verboseModuleFlag = "vmodule";
+   static string maxVerboseLevelFlag = "v";
+
+   static FilterConfig create(ref string[] commandLine)
+   {
+      FilterConfig filterConfig;
+
+      void handleModuleConfig(string option, string value)
+      {
+         assert(option == verboseModuleFlag);
+         filterConfig.vModuleConfigs = VModuleConfig.create(value);
+      }
+
+      getopt(commandLine,
+             std.getopt.config.passThrough,
+             maxSeverityFlag, &filterConfig._maxSeverity,
+             verboseModuleFlag, &handleModuleConfig,
+             maxVerboseLevelFlag, &filterConfig._maxVerboseLevel);
+
+      return filterConfig;
+   }
+
+   this(this) { _vModuleConfigs = _vModuleConfigs.dup; }
+
+   ref FilterConfig opAssign(FilterConfig filterConfig)
+   {
+      swap(this, filterConfig);
+      return this;
+   }
+
+/++
+Severity to use for _logging.
+
+The logging framework will only log messages with a severity greater than or equal to the value of this property.
++/
+   @property void maxSeverity(Severity severity)
+   {
+      _maxSeverity = severity;
+   }
+
+/++
++/
+   @property void maxVerboseLevel(short maxVerboseLevel)
+   {
+      _maxVerboseLevel = maxVerboseLevel;
+   }
+/++
+   XXX talk about how this override maxVerboseLevel
+Verbose logging configuration.
+
+Messages logged by using the template function $(D vlog) or $(D vlogf) will be filtered by comparing against each VModuleConfig until a match is found. If no match is found the verbose message will not get logged.
+
+See_Also:
+   VModuleConfig
++/
+   @property void vModuleConfigs(VModuleConfig[] vModuleConfigs)
+   {
+      _vModuleConfigs = vModuleConfigs;
+   }
+
+/++
+Function pointer for handling log message with a severity of fatal.
+
+This function will be called by the thread trying to log a fatal message by using $(D log) or $(D logf). The function $(I fatalHandler) should not return; otherwise the framework will assert(false).
++/
+   @property void fatalHandler(void function() fatalHandler)
+   {
+      _fatalHandler = fatalHandler;
+   }
+
+   private Severity _maxSeverity = Severity.error;
+   private short _maxVerboseLevel = short.min;
+   private VModuleConfig[] _vModuleConfigs;
+   private void function() _fatalHandler;
+}
+
+version(unittest)
+{
+   // Test severity filtering
+   class SeverityFilter : Logger
+   {
+      shared void log(const ref LogMessage msg)
+      {
+         called = true;
+         severity = msg.severity;
+         message = cast(shared)msg.message;
+      }
+
+      shared void flush()
+      {
+         flushCalled = true;
+      }
+
+      shared void clear()
+      {
+         message = string.init;
+         called = false;
+         flushCalled = false;
+      }
+
+      const(char)[] message;
+      Severity severity;
+      bool called;
+      bool flushCalled;
+   }
+}
+
+unittest
+{
+   DefaultLogger logInfo;
+   DefaultLogger logWarning;
+   DefaultLogger logError;
+   DefaultLogger logFatal;
+
+   ModuleConfig testConfig;
+
+   // logger shouldn't log if not init
+   assert(!logInfo.willLog);
+
+   // logger should throw if init but module config is not init
+   logInfo.init(Severity.info, &testConfig);
+   // XXX clean this
+   try { logInfo.willLog; assert(false); } catch(Exception e) {}
+
+   FilterConfig filterConfig;
+   filterConfig.maxSeverity = Severity.warning;
+
+   auto logger = cast(shared) new SeverityFilter();
+
+   testConfig.init(logger, filterConfig);
+
+   logWarning.init(Severity.warning, &testConfig);
+   logError.init(Severity.error, &testConfig);
+   logFatal.init(Severity.fatal, &testConfig);
+
+   auto loggedMessage = "logged message";
+
+   // Test willLog
+   assert(!logInfo.willLog);
+   assert(logWarning.willLog);
+   assert(logError.willLog);
+   assert(logFatal.willLog);
+
+   // Test logging and severity filtering
+   logInfo(loggedMessage);
+   assert(!logger.called);
+
+   logger.clear();
+   logWarning(loggedMessage);
+   assert(logger.called);
+   assert(logger.severity == Severity.warning &&
+          logger.message == loggedMessage);
+
+   logger.clear();
+   logError(loggedMessage);
+   assert(logger.called);
+   assert(logger.severity == Severity.error &&
+          logger.message == loggedMessage);
+
+   logger.clear();
+   logError.format("%s", loggedMessage);
+   assert(logger.called);
+   assert(logger.severity == Severity.error &&
+          logger.message == loggedMessage);
+
+   // XXX this is ugly. Fix this test. look into using assertThrown
+   logger.clear();
+   try { logFatal(loggedMessage); assert(false); } catch (AssertError e) {}
+   assert(logger.called);
+   assert(logger.severity == Severity.fatal &&
+          logger.message == loggedMessage);
+   assert(logger.flushCalled);
+
+   logger.clear();
+   logWarning.format("%s", loggedMessage);
+   assert(logger.called);
+   assert(logger.severity == Severity.warning &&
+          logger.message == loggedMessage);
+
+   // logInfo didn't log so when(true) shouldn't log either
+   assert(!logInfo.when(true).willLog);
+
+   // LogWarning would log so when(true) should log also
+   assert(logWarning.when(true).willLog);
+
+   // when(false) shouldn't log
+   assert(!logError.when(false).willLog);
+}
+
+struct DefaultLogger
+{
+   private void init(Severity severity, shared(ModuleConfig)* config)
+   {
+      _config = config;
+
+      _message.severity = severity;
+      _message.threadId = 0; // TODO: fix core.Thread's ThreadAddr property
+   }
+
 /++
 Returns true when write and format will lead to a message being logged.
 +/
-   @property bool willLog() const { return _logger !is null; }
+   @property bool willLog() const
+   {
+      enforce(_config is null || (cast(shared)_config).isInitialized);
+      return _config !is null && _message.severity <= (cast(shared)_config).severity;
+   }
+
+/++
++/
+   DefaultLogger when(lazy bool now)
+   {
+      if(willLog && now) return this;
+
+      return _noopLogger;
+   }
    
 /++
 Records each argument in one log line or record.
@@ -270,15 +529,18 @@ Example:
    log!info.write("The value of pi is ", pi);
 ---
 +/
-   void write(T...)(T args)
+   void opCall(string file = __FILE__, int line = __LINE__, T...)(lazy T args)
    {
       // XXX change this to use formattedWrite's new format string
-      if(_logger)
+      if(willLog)
       {
-        _message.message = text(args);
-        _logger.log(_message);
+         /// XXX move this to format when I start using the new formattedWrite
+         _message.file = file;
+         _message.line = line;
+         log(_message, args);
       }
    }
+   alias opCall write; /// ditto
 
 /++
 Records formatted message in one log line or record.
@@ -294,368 +556,409 @@ Example:
    log!info.format("The number %s is the golden ratio", goldenRatio);
 ---
 +/
-   void format(T...)(string fmt, T args)
+   void format(string file = __FILE__, int line = __LINE__, T...)
+              (lazy string fmt, lazy T args)
    {
-      if(_logger)
+      if(willLog)
       {
-         auto writer = appender!string();
-         writer.reserve(fmt.length);
-         formattedWrite(writer, fmt, args);
-
-         _message.message = writer.data;
-         _logger.log(_message);
+         _message.file = file;
+         _message.line = line;
+         logf(_message, fmt, args);
       }
    }
 
-   private shared(InternalLogging) * _logger;
-   private Logger.LogMessage _message;
-}
-
-struct NoopLogged
-{
-   @property bool willLog() const { return false; }
-
-   void write(T...)(T args) {}
-   void format(T...)(string fmt, T args) {}
-}
-
-/++
-Configuration struct for the module.
-
-This object must be used to configure the logging module at initialization.  All the properties are optional and can be use to configure the framework's behavior.
-+/
-struct LogConfig
-{
-/++
-Level to use for _logging.
-
-The logging framework will only log messages with a severity greater than or equal to the value of this property.
-+/
-   @property void level(uint level)
+   private void log(T...)(ref Logger.LogMessage message, T args)
    {
-      enforce(level < levelMax);
-      _level = level;
-   }
+      assert(willLog);
 
-/++
-Verbose logging configuration.
-
-Messages logged by using the template function $(D vlog) or $(D vlogf) will be filtered by comparing against each VLogConfig until a match is found. If no match is found the verbose message will not get logged.
-
-See_Also:
-   VLogConfig
-+/
-   @property void vLogConfigs(VLogConfig[] vLogConfigs)
-   {
-      _vLogConfigs = vLogConfigs;
-   }
-
-/++
-Function pointer for handling log message with a severity of fatal.
-
-This function will be called by the thread trying to log a fatal message by using $(D log) or $(D logf). The function $(I fatalHandler) should not return; otherwise the framework will assert(false).
-+/
-   @property void fatalHandler(void function() fatalHandler)
-   {
-      _fatalHandler = fatalHandler;
-   }
-
-   private string _name;
-   private int _level = error;
-   private VLogConfig[] _vLogConfigs;
-   private void function() _fatalHandler;
-}
-
-unittest
-{
-   // Test level filtering
-   class LevelFilter : Logger
-   {
-      shared void log(const ref LogMessage msg)
+      _writer.clear(); // XXX make sure clear doesn't deallocate mem
+      foreach(T, arg; args)
       {
-         called = true;
-         level = msg.level;
-         message = msg.message;
+         /*if(is(T == string)) _writer.put(cast(char[])arg);
+         else */ _writer.put(to!(char[])(arg));
       }
 
-      shared void flush()
-      {
-         flushCalled = true;
-      }
+      message.message = _writer.data;
 
-      shared void clear()
-      {
-         message = string.init;
-         level = -1;
-         called = false;
-         flushCalled = false;
-      }
-
-      string message;
-      int level;
-      bool called;
-      bool flushCalled;
-   }
-
-   LogConfig logConfig;
-   logConfig.level = warning;
-   logConfig.vLogConfigs = VLogConfig.create("*logging.d=2");
-
-   auto logger = cast(shared) new LevelFilter();
-   InternalLogging logging;
-
-   logging.init({ return cast(shared(Logger)) logger; },
-                logConfig);
-
-   auto loggedMessage = "logged message";
-
-   // Test logging and level filtering
-   logging.getLog("package/logging.d", 11, info, true).write(loggedMessage);
-   assert(!logger.called);
-
-   logger.clear();
-   logging.getLog("package/logging.d", 11, warning, true).write(loggedMessage);
-   assert(logger.called);
-   assert(logger.level == warning &&
-          logger.message == loggedMessage);
-
-   logger.clear();
-   logging.getLog("package/logging.d", 11, error, true).write(loggedMessage);
-   assert(logger.called);
-   assert(logger.level == error &&
-          logger.message == loggedMessage);
-
-   logger.clear();
-   logging.getLog("package/logging.d", 11, error, true).write(loggedMessage);
-   assert(logger.called);
-   assert(logger.level == error &&
-          logger.message == loggedMessage);
-
-   // XXX this is ugly. Fix this test. look into using assertThrown
-   logger.clear();
-   try
-   {
-      logging.getLog("package/logging.d", 11, fatal, true).write(loggedMessage);
-      assert(false);
-   }
-   catch (AssertError e) {}
-   assert(logger.called);
-   assert(logger.level == fatal &&
-          logger.message == loggedMessage);
-   assert(logger.flushCalled);
-
-   logger.clear();
-   logging.getLog("package/logging.d", 11, warning, true).write(loggedMessage);
-   assert(logger.called);
-   assert(logger.level == warning &&
-          logger.message == loggedMessage);
-
-   // Test vlogging and module filtering
-   logger.clear();
-   logging.getVlog("package/logging.d", 11, 2, true).write(loggedMessage);
-   assert(logger.called);
-   assert(logger.level == info &&
-          logger.message == loggedMessage);
-
-   logger.clear();
-   logging.getVlog("package/logging.d", 11, 3, true).write(loggedMessage);
-   assert(!logger.called);
-
-   logger.clear();
-   logging.getVlog("not_this_file", 22, 0, true).write(loggedMessage);
-   assert(!logger.called); 
-
-   logger.clear();
-   logging.getVlog("package/logging.d", 11, 2, true).write(loggedMessage);
-   assert(logger.called);
-   assert(logger.level == info &&
-	       logger.message == loggedMessage);
-}
-
-// TODO: fix core.Thread so that ThreadAddr is exposed
-private shared struct InternalLogging
-{
-   private static __gshared auto noopLogged = Logged.init;
-
-   void init(shared(Logger) delegate() logCreator,
-             LogConfig logConfig)
-   { 
-      enforce(cas(&_initialized, false, true));
-
-      _vLogConfigs = logConfig._vLogConfigs.idup;
-      _logger = logCreator();
-      _level = logConfig._level;
-      _fatalHandler =  logConfig._fatalHandler ? 
-                       logConfig._fatalHandler :
-                       function {};
-   }
-
-   Logged getVlog(string file, int line, uint level, lazy bool now)
-   in
-   {
-      assert(_initialized);
-   }
-   body
-   {
-      if(logMatches(file, level, _vLogConfigs) && now)
-      {
-         return Logged(&this, Logger.LogMessage(file,
-                                                line,
-                                                info,
-                                                0, // XXX thread id
-                                                "",
-                                                true,
-                                                level));
-      }
-
-      return noopLogged;
-   }
-
-   Logged getLog(string file, int line, int level, lazy bool now)
-   in
-   {
-      assert(_initialized);
-   }
-   body
-   {
-      if(level <= _level && now) 
-      {
-         return Logged(&this, Logger.LogMessage(file,
-                                                line,
-                                                level,
-                                                0, // XXX thread id
-                                                "",
-                                                false,
-                                                0));
-      }
-      
-      return noopLogged;
-   }
-
-   void log(const ref Logger.LogMessage message)
-   {
       scope(exit)
       {
-         if(message.level == fatal)
+         if(message.severity == Severity.fatal)
          {
             /+
              + The other of the scope(exit) is important. We want
              + _fatalHandler to run before the assert.
              +/
             scope(exit) assert(false);
-            scope(exit) _fatalHandler();
-            _logger.flush();
+            scope(exit) _config.fatalHandler(); 
+            _config.logger.flush();
          }
       }
 
-      _logger.log(message);
+      _config.logger.log(message);
    }
 
+   private void logf(T...)(ref Logger.LogMessage message, string fmt, T args)
+   {
+      assert(willLog);
+
+      _writer.clear(); // XXX make sure clear doesn't deallocate mem
+      _writer.reserve(fmt.length);
+      formattedWrite(_writer, fmt, args);
+
+      message.message = _writer.data;
+
+      scope(exit)
+      {
+         if(message.severity == Severity.fatal)
+         {
+            /+
+             + The other of the scope(exit) is important. We want
+             + _fatalHandler to run before the assert.
+             +/
+            scope(exit) assert(false);
+            scope(exit) _config.fatalHandler(); 
+            _config.logger.flush();
+         }
+      }
+
+      _config.logger.log(message);
+   }
+
+   private @property Severity severity()
+   {
+      assert(_config); // assert that it was initialized
+      return _message.severity;
+   }
+
+   private Logger.LogMessage _message;
+   private Appender!(char[]) _writer;
+
+   private shared ModuleConfig* _config;
+
+   private static __gshared DefaultLogger _noopLogger;
+}
+
+unittest
+{
+   auto loggedMessage = "Verbose log message";
+
+   DefaultLogger logInfo;
+   DefaultLogger logWarning;
+   VerboseLogger verboseLog;
+   ModuleConfig testConfig;
+
+   logInfo.init(Severity.info, &testConfig);
+   logWarning.init(Severity.warning, &testConfig);
+
+   // verbose logging shouldn't throw if module not init
+   try { verboseLog = VerboseLogger.create(0, testConfig, &logWarning);
+         assert(false); } catch(Exception e) {}
+
+   FilterConfig filterConfig;
+   filterConfig.maxSeverity = Severity.warning;
+   filterConfig.maxVerboseLevel = 3;
+   filterConfig.vModuleConfigs = VModuleConfig.create("*logging.d=2");
+
+   auto logger = cast(shared) new SeverityFilter();
+
+   testConfig.init(logger, filterConfig);
+
+   // Test vlogging and module filtering
+   logger.clear();
+   verboseLog = VerboseLogger.create(2, testConfig, &logWarning);
+   assert(verboseLog.willLog);
+   verboseLog(loggedMessage);
+   assert(logger.called);
+   assert(logger.severity == Severity.warning &&
+          logger.message == loggedMessage);
+
+   // test format
+   logger.clear();
+   verboseLog.format("%s", loggedMessage);
+   assert(logger.called);
+   assert(logger.severity == Severity.warning &&
+          logger.message == loggedMessage);
+
+   // test large verbose level
+   logger.clear();
+   verboseLog = VerboseLogger.create(3, testConfig, &logWarning);
+   verboseLog(loggedMessage);
+   assert(!logger.called);
+
+   // test wrong module
+   logger.clear();
+   verboseLog = VerboseLogger.create(4, testConfig, &logWarning, "not_this");
+   verboseLog.format("%s", loggedMessage);
+   assert(!logger.called); 
+
+   // test verbose level
+   logger.clear();
+   verboseLog = VerboseLogger.create(3, testConfig, &logWarning, "not_this");
+   verboseLog.format("%s", loggedMessage);
+   assert(logger.called); 
+   assert(logger.severity == Severity.warning &&
+          logger.message == loggedMessage);
+
+   // test severity config too high
+   logger.clear();
+   verboseLog = VerboseLogger.create(2, testConfig, &logInfo);
+   assert(!verboseLog.willLog);
+   verboseLog.format("%s", loggedMessage);
+   assert(!logger.called); 
+}
+
+struct VerboseLogger
+{
+   private static VerboseLogger create(short level,
+                                       ref shared(ModuleConfig) config,
+                                       DefaultLogger* logger,
+                                       string file = __FILE__)
+   {
+      enforce(config.isInitialized);
+
+      if(logger.willLog &&
+         logMatches(file, level, config.verboseLevel, config.vModuleConfigs))
+      {
+         VerboseLogger vlogger;
+         vlogger._message.severity = logger.severity;
+         vlogger._message.threadId = 0; // TODO: fix core.Thread's ThreadAddr
+         vlogger._message.isVerbose = true;
+         vlogger._message.verbose = level;
+
+         vlogger._logger = logger;
+
+         return vlogger;
+      }
+
+      return VerboseLogger._verboseNoop;
+   }
+
+   @property bool willLog() const
+   {
+      return _logger !is null && _message.isVerbose && _logger.willLog;
+   }
+
+   ref VerboseLogger when(lazy bool now)
+   {
+      if(willLog && now)
+      {
+         return this;
+      }
+
+      return _verboseNoop;
+   }
+
+   void opCall(string file = __FILE__, int line = __LINE__, T...)
+              (lazy T args)
+   {
+      if(willLog)
+      {
+         /// XXX move this to format
+         _message.file = file;
+         _message.line = line;
+         _logger.log(_message, args);
+      }
+   }
+   alias opCall write;
+
+   void format(string file = __FILE__, int line = __LINE__, T...)
+              (lazy string fmt, lazy T args)
+   {
+      if(willLog)
+      {
+         _message.file = file;
+         _message.line = line;
+         _logger.logf(_message, fmt, args);
+      }
+   }
+
+   private Logger.LogMessage _message;
+   private DefaultLogger* _logger;
+
+   private static __gshared VerboseLogger _verboseNoop;
+}
+
+unittest
+{
+}
+
+private shared struct ModuleConfig
+{
+   void init(shared(Logger) logger,
+             FilterConfig filterConfig)
+   {
+      enforce(logger);
+      enforce(cas(&_initializing, false, true));
+      scope(success) _initialized = true;
+
+      _vModuleConfigs = filterConfig._vModuleConfigs.idup;
+
+      _logger = logger;
+
+      _severity = filterConfig._maxSeverity;
+
+      _fatalHandler =  filterConfig._fatalHandler ?
+                       filterConfig._fatalHandler :
+                       function {};
+
+      _verboseLevel = filterConfig._maxVerboseLevel;
+   }
+
+   bool isInitialized()
+   {
+      return _initialized;
+   }
+
+   @property shared(Logger) logger()
+   {
+      assert(_initialized);
+      return _logger;
+   }
+
+   @property Severity severity()
+   {
+      assert(_initialized);
+      return _severity;
+   }
+
+   @property short verboseLevel()
+   {
+      assert(_initialized);
+      return _verboseLevel;
+   }
+
+   @property immutable(VModuleConfig)[] vModuleConfigs()
+   {
+      assert(_initialized);
+      return _vModuleConfigs;
+   }
+
+   @property void function() fatalHandler()
+   {
+      assert(_initialized);
+      return _fatalHandler;
+   }
+
+   private bool _initializing;
    private bool _initialized;
+
    private Logger _logger;
-   private int _level;
-   private immutable(VLogConfig)[] _vLogConfigs;
+   private Severity _severity;
+   private short _verboseLevel;
+   private immutable(VModuleConfig)[] _vModuleConfigs;
    private __gshared void function() _fatalHandler;
 }
 
 unittest
 {
    // Test equals
-   VLogConfig[] configs = [ VLogConfig("package/module",
-                                       VLogConfig.Matching.equals,
-                                       1) ];
-   assert(logMatches("package/module", 1, configs));
-   assert(logMatches("package/module.d", 1, configs));
-   assert(logMatches("package/module", 0, configs));
+   VModuleConfig[] configs = [ VModuleConfig("package/module",
+                                             VModuleConfig.Matching.equals,
+                                             1) ];
+   assert(logMatches("package/module", 1, -1, configs));
+   assert(logMatches("package/module.d", 1, -1, configs));
+   assert(logMatches("package/module", 0, -1, configs));
 
-   assert(!logMatches("module", 1, configs));
-   assert(!logMatches("package/module", 2, configs));
+   assert(!logMatches("module", 1, -1, configs));
+   assert(!logMatches("package/module", 2, 3, configs));
 
    // Test startsWith
    configs[0]._pattern = "package";
-   configs[0]._matching = VLogConfig.Matching.startsWith,
+   configs[0]._matching = VModuleConfig.Matching.startsWith,
    configs[0]._level = 1;
-   assert(logMatches("package/module", 1, configs));
-   assert(logMatches("package/module.d", 1, configs));
-   assert(logMatches("package/module", 0, configs));
-   assert(logMatches("package/another.d", 1, configs));
+   assert(logMatches("package/module", 1, -1, configs));
+   assert(logMatches("package/module.d", 1, -1, configs));
+   assert(logMatches("package/module", 0, -1, configs));
+   assert(logMatches("package/another.d", 1, -1, configs));
 
-   assert(!logMatches("module", 1, configs));
-   assert(!logMatches("another/package/module", 1, configs));
-   assert(!logMatches("package/module.d", 2, configs));
+   assert(!logMatches("module", 1, -1, configs));
+   assert(!logMatches("another/package/module", 1, -1, configs));
+   assert(!logMatches("package/module.d", 2, 3, configs));
 
    // Test endsWith
    configs[0]._pattern = "module";
-   configs[0]._matching = VLogConfig.Matching.endsWith,
+   configs[0]._matching = VModuleConfig.Matching.endsWith,
    configs[0]._level = 1;
-   assert(logMatches("package/module", 1, configs));
-   assert(logMatches("package/module.d", 1, configs));
-   assert(logMatches("package/module", 0, configs));
-   assert(logMatches("module", 1, configs));
+   assert(logMatches("package/module", 1, -1, configs));
+   assert(logMatches("package/module.d", 1, -1, configs));
+   assert(logMatches("package/module", 0, -1, configs));
+   assert(logMatches("module", 1, -1, configs));
 
-   assert(!logMatches("another", 1, configs));
-   assert(!logMatches("package/module", 2, configs));
+   assert(!logMatches("another", 1, -1, configs));
+   assert(!logMatches("package/module", 2, 3, configs));
+
+   // Test global max verbose level
+   assert(logMatches("package", 2, 2, configs));
 }
 
+/+
+ + Returns true when it matched an entry in configs, or when the file doesn't
+ + match an entry in configs and level is less <= maxLevel.
+ +/
 private bool logMatches(string file,
-                        uint level,
-                        const VLogConfig[] configs)
+                        short level,
+                        short maxLevel,
+                        const VModuleConfig[] configs)
 {
+   bool matchedAFile;
    foreach(config; configs)
    {
-      if(config.match(file, level)) return true;
+      auto result = config.match(file, level);
+      if (result == VModuleConfig.Match.yes) return true;
+      
+      matchedAFile = matchedAFile || (result == VModuleConfig.Match.file);
    }
 
-   return false;
+   return !matchedAFile && level <= maxLevel;
 } 
 
 unittest
 {
-   auto result = VLogConfig.create("module=1,*another=3,even*=2");
+   auto result = VModuleConfig.create("module=1,*another=3,even*=2");
    assert(result.length == 3);
    assert(result[0]._pattern == "module");
-   assert(result[0]._matching == VLogConfig.Matching.equals);
+   assert(result[0]._matching == VModuleConfig.Matching.equals);
    assert(result[0]._level == 1);
 
    assert(result[1]._pattern == "another");
-   assert(result[1]._matching == VLogConfig.Matching.endsWith);
+   assert(result[1]._matching == VModuleConfig.Matching.endsWith);
    assert(result[1]._level == 3);
 
    assert(result[2]._pattern == "even");
-   assert(result[2]._matching == VLogConfig.Matching.startsWith);
+   assert(result[2]._matching == VModuleConfig.Matching.startsWith);
    assert(result[2]._level == 2);
 
    try
    {
-      VLogConfig.create("module=2,");
+      VModuleConfig.create("module=2,");
       assert(false);
    }
    catch (Exception e) {}
 
    try
    {
-      VLogConfig.create("module=a");
+      VModuleConfig.create("module=a");
       assert(false);
    }
    catch (Exception e) {}
 
    try
    {
-      VLogConfig.create("module=2,another=");
+      VModuleConfig.create("module=2,another=");
       assert(false);
    }
    catch (Exception e) {}
 
    try
    {
-      VLogConfig.create("module=2,ano*ther=3");
+      VModuleConfig.create("module=2,ano*ther=3");
       assert(false);
    }
    catch (Exception e) {}
 
    try
    {
-      VLogConfig.create("module=2,*another*=3");
+      VModuleConfig.create("module=2,*another*=3");
       assert(false);
    }
    catch (Exception e) {}
@@ -664,9 +967,9 @@ unittest
 /++
 Structure for configuring verbose logging.
 
-This structure is used to control verbose logging on a per module basis. A verbose message with level $(I x) will get logged at severity level info if there is a VLogConfig entry that matches to the source file and the verbose level of that entry is greater than or equal to $(I x).
+This structure is used to control verbose logging on a per module basis. A verbose message with level $(I x) will get logged at severity level info if there is a VModuleConfig entry that matches to the source file and the verbose level of that entry is greater than or equal to $(I x).
 +/
-struct VLogConfig
+struct VModuleConfig
 {
    private enum Matching
    {
@@ -676,15 +979,15 @@ struct VLogConfig
    } 
 
 /++
-Creates an array of $(D VLogConfig) based on a configuration string.
+Creates an array of $(D VModuleConfig) based on a configuration string.
 
 The format of the configuration string is as follow "$(B [pattern])=$(B [level]),...", where $(B [pattern]) may contain any character allowed in a file name and $(B [level]) must be convertible to an positive integer (greater than or equal to zero). If $(B [pattern]) contains a '*' then it must be at the start or the end. If $(B [pattern]) ends with a '*' then it will match any source file name that starts with the rest of $(B [pattern]). If $(B [pattern]) starts with a '*' then it will match any source file name that ends with a the rest of $(B [pattern]).
 
-For every $(B [pattern])=$(B [level]) in the configuration string a $(D VLogConfig) will be created and included in the returned array.
+For every $(B [pattern])=$(B [level]) in the configuration string a $(D VModuleConfig) will be created and included in the returned array.
 
 Example:
 ---
-auto configs = VLogConfig.create("special/module=2,great/*=3,*/test=1");
+auto configs = VModuleConfig.create("special/module=2,great/*=3,*/test=1");
 ---
 
 The code above will return a verbose logging configuration that will:
@@ -694,9 +997,9 @@ $(DD 2. Log verbose 3 and lower messages from package great)
 $(DD 3. Log verbose 1 and lower messages from any file that ends with test{,.d})
 )
 +/
-   static VLogConfig[] create(string config)
+   static VModuleConfig[] create(string config)
    {
-      VLogConfig[] result;
+      VModuleConfig[] result;
       foreach(entry; splitter(config, ","))
       {
          enforce(entry != "");
@@ -706,26 +1009,27 @@ $(DD 3. Log verbose 1 and lower messages from any file that ends with test{,.d})
          auto mod = array(splitter(entryParts[0], "*"));
          enforce(mod.length == 1 || mod.length == 2);
          
+         auto level = to!short(entryParts[1]);
          if(mod.length == 1 && mod[0] != "")
          {
-            VLogConfig logConfig = VLogConfig(mod[0],
-                                              Matching.equals,
-                                              to!uint(entryParts[1]));
-            result ~= logConfig;
+            VModuleConfig vModuleConfig = VModuleConfig(mod[0],
+                                                        Matching.equals,
+                                                        level);
+            result ~= vModuleConfig;
          }
          else if(mod[0] != "" && mod[1] == "")
          {
-            VLogConfig logConfig = VLogConfig(mod[0],
-                                              Matching.startsWith,
-                                              to!uint(entryParts[1]));
-            result ~= logConfig;
+            VModuleConfig vModuleConfig = VModuleConfig(mod[0],
+                                                        Matching.startsWith,
+                                                        level);
+            result ~= vModuleConfig;
          }
          else if(mod[0] == "" && mod[1] != "")
          {
-            VLogConfig logConfig = VLogConfig(mod[1],
-                                              Matching.endsWith,
-                                              to!uint(entryParts[1]));
-            result ~= logConfig;
+            VModuleConfig vModuleConfig = VModuleConfig(mod[1],
+                                                        Matching.endsWith,
+                                                        level);
+            result ~= vModuleConfig;
          }
          else
          {
@@ -736,34 +1040,34 @@ $(DD 3. Log verbose 1 and lower messages from any file that ends with test{,.d})
       return result;
    }
 
-   private bool match(string file, uint level) const
+   private enum Match { no, yes, file }
+
+   private Match match(string file, short level) const
    { 
-      auto match = false;
-      // XXX file but against startWith/endsWith for not allowing const
+      bool matched;
+      // XXX file bug against startWith/endsWith for not allowing const
       auto pattern = cast(string) _pattern;
 
       final switch(_matching)
       {
-         case VLogConfig.Matching.startsWith:
-            match = startsWith(file, pattern) &&
-                         level <= _level; 
+         case VModuleConfig.Matching.startsWith:
+            matched = startsWith(file, pattern);
             break;
-         case VLogConfig.Matching.endsWith:
-            match = (endsWith(file, pattern) ||
-                     endsWith(file, pattern ~ ".d")) && 
-                    level <= _level; 
+
+         case VModuleConfig.Matching.endsWith:
+            matched = endsWith(file, pattern) ||
+                      endsWith(file, pattern ~ ".d");
             break;
-         case VLogConfig.Matching.equals:
-            match = (file == pattern ||
-                     file == pattern ~ ".d") &&
-                    level <= _level; 
+
+         case VModuleConfig.Matching.equals:
+            matched = file == pattern || file == pattern ~ ".d";
             break;
       }
 
-      return match;
+      return matched ? level <= _level ? Match.yes : Match.file : Match.no; 
    }
 
-   private this(string pattern, Matching matching, uint level)
+   private this(string pattern, Matching matching, short level)
    {
       _pattern = pattern;
       _matching = matching;
@@ -772,7 +1076,7 @@ $(DD 3. Log verbose 1 and lower messages from any file that ends with test{,.d})
 
    private string _pattern;
    private Matching _matching;
-   private uint _level;
+   private short _level;
 }
 
 /++
@@ -784,12 +1088,12 @@ interface Logger
    {
       string file;
       int line;
-      int level;
+      Severity severity;
       int threadId;
-      string message;
+      char[] message;
 
       bool isVerbose;
-      uint verbose;
+      short verbose;
 
       string logLine() const
       {
@@ -800,7 +1104,7 @@ interface Logger
                         "%s:%d:%s:%d %s%s",
                         file,
                         line,
-                        severityNames[level],
+                        severityNames[severity],
                         threadId,
                         message,
                         newline);
@@ -812,7 +1116,7 @@ interface Logger
 /++
 Logs a message.
 
-The method is called by the logging module whenever it decides that a message should be logged. It is recommend that the implementation of this method doesn't perform any filtering based on level since at this point all configured filters were applied.
+The method is called by the logging module whenever it decides that a message should be logged. It is recommend that the implementation of this method doesn't perform any filtering based on severity since at this point all configured filters were applied.
 
 The method is allow to return immediately without persisting the message.
 +/
@@ -828,13 +1132,93 @@ The method must not return until all pending log operations complete.
    shared void flush();
 }
 
+unittest
+{
+   auto name = "program_name";
+   // assert default values
+   auto loggerConfig = LoggerConfig(name);
+   assert(loggerConfig.loggerName == name);
+   assert(loggerConfig.logToStderr == false);
+   assert(loggerConfig.stderrThreshold == Severity.error);
+   // can't test logDirectory as it is env dependent
+
+   auto args = [name,
+                "--" ~ LoggerConfig.logToStderrFlag,
+                "--" ~ LoggerConfig.stderrThresholdFlag, "fatal",
+                "--" ~ LoggerConfig.logDirectoryFlag, "/tmp",
+                "--ignoredOption"];
+
+   loggerConfig = LoggerConfig.create(args);
+   assert(args.length == 2);
+   assert(args[0] == name);
+
+   assert(loggerConfig.loggerName == name);
+   assert(loggerConfig.logToStderr == true);
+   assert(loggerConfig.stderrThreshold == Severity.fatal);
+   assert(loggerConfig.logDirectory == "/tmp");
+}
+
+public struct LoggerConfig
+{
+   static string logToStderrFlag = "logtostderr";
+   static string stderrThresholdFlag = "stderrthreshold";
+   static string logDirectoryFlag = "logdir";
+
+   static LoggerConfig create(ref string[] commandLine)
+   {
+      enforce(commandLine.length > 0);
+
+      auto loggerConfig = LoggerConfig(commandLine[0]);
+
+      getopt(commandLine,
+             std.getopt.config.passThrough,
+             logToStderrFlag, &loggerConfig._logToStderr,
+             stderrThresholdFlag, &loggerConfig._stderrThreshold,
+             logDirectoryFlag, &loggerConfig._logDirectory);
+
+      return loggerConfig;
+   }
+
+   this(string loggerName)
+   {
+      _loggerName = loggerName;
+      
+      // get default log dir
+      _logDirectory = getenv("LOGDIR");
+      if(_logDirectory is null) _logDirectory = getenv("TEST_TMPDIR");
+   }
+
+   @property string loggerName() { return _loggerName; }
+
+   @property void logToStderr(bool logToStderr) { _logToStderr = logToStderr; }
+   @property bool logToStderr() { return _logToStderr; }
+
+   @property void stderrThreshold(Severity stderrThreshold)
+   {
+      _stderrThreshold = stderrThreshold;
+   }
+   @property Severity stderrThreshold() { return _stderrThreshold; }
+
+   @property void logDirectory(string logDirectory)
+   {
+      _logDirectory = logDirectory;
+   }
+   @property string logDirectory() { return _logDirectory; }
+
+
+   private string _loggerName;
+   private bool _logToStderr;
+   private Severity _stderrThreshold = Severity.error;
+   private string _logDirectory;
+}
+
 /++
 +/
-// XXX Allow storing file in a diff dir
 // XXX Allow the configuration of the log file name
+// XXX Use LoggerConfig
 class SharedLogger : Logger
 {
-   private this(string name)
+   private this(LoggerConfig loggerConfig)
    {
       BufferedWriter!FileWriter[] bufferedWriters(FileWriter[] writers)
       {
@@ -847,20 +1231,8 @@ class SharedLogger : Logger
          return buffers;
       }
 
-      _writers = bufferedWriters(createFileWriters(name));
+      _writers = createFileWriters(loggerConfig.loggerName);
       _mutex = new Mutex;
-   }
-
-   static shared(Logger) delegate() getCreator(string name)
-   {
-      shared(Logger) creator()
-      { 
-         static Logger logger;
-         logger = logger ? logger : new SharedLogger(name);
-         return cast(shared(Logger)) logger;
-      }
-
-      return &creator;
    }
 
    shared void log(const ref LogMessage message)
@@ -869,7 +1241,7 @@ class SharedLogger : Logger
       {
          foreach(i, ref writer; _writers)
          {
-            if(i >= message.level) writer.put(message.logLine());
+            if(i >= message.severity) writer.put(message.logLine());
          }
       }
    }
@@ -886,96 +1258,22 @@ class SharedLogger : Logger
    }
 
    private Mutex _mutex;
-   __gshared BufferedWriter!FileWriter[] _writers;
+   __gshared FileWriter[] _writers;
 }
-
-unittest
-{
-   void removeTestLogs(FileWriter[] writers)
-   {
-      foreach(ref writer; writers)
-      {
-         auto name = writer._file.name;
-         writer._file.close();
-         remove(name);
-      }
-   }
-
-   auto msgs = ["fatal message",
-                "error message",
-                "warning message",
-                "info message"];
-
-   auto fileWriters = createFileWriters("logging_level_unittest");
-   auto logger = new MultiWriter!FileWriter(fileWriters);
-   scope(exit) removeTestLogs(fileWriters);
-
-   foreach(level; 0 .. levelMax)
-   {
-      auto msg = Logger.LogMessage("",
-                                   0,
-                                   level,
-                                   0,
-                                   msgs[level],
-                                   false,
-                                   0);
-
-      logger.log(msg);
-   }
-
-   /+
-    + Check the content of the files: for every file for severity level 'x'
-    + there should be a message from a severity level <= 'x'. 
-    +/
-   foreach(fileLevel; 0 .. levelMax)
-   {
-      fileWriters[fileLevel]._file.flush();
-      auto file = File(fileWriters[fileLevel]._file.name, "r");
-      for(auto level = 0; level <= fileLevel; ++level)
-      {
-         auto line = file.readln();
-         assert(endsWith(line, msgs[level] ~ newline));
-      }
-   }
-}
-
-private class MultiWriter(LogWriter)
-{
-   this(LogWriter[] writers)
-   {
-      assert(writers.length == compiledLevel + 1);
-      _writers = writers;
-   }
-
-
-   void log(const ref Logger.LogMessage message)
-   {
-      for(int aLevel = message.level; aLevel <= compiledLevel; ++aLevel)
-      {
-         _writers[aLevel].put(message.logLine());
-      }
-   }
-
-   void flush()
-   {
-      foreach(ref writer; _writers)
-      {
-         writer.flush();
-      }
-   }
-
-
-   private LogWriter[] _writers;
-}
-
 
 private FileWriter[] createFileWriters(string name)
 {
    auto time = cast(DateTime) Clock.currTime();
 
-   // Create file for every level
-   auto writers = new FileWriter[compiledLevel + 1];
-   foreach(aLevel; 0 .. compiledLevel + 1)
+   // Create file for every severity 
+   static if(is(typeof(fatal) == NoopLogger)) enum numberOfWriters = 0;
+   else static if(is(typeof(error) == NoopLogger)) enum numberOfWriters = 1;
+   else static if(is(typeof(warning) == NoopLogger)) enum numberOfWriters = 2;
+   else static if(is(typeof(info) == NoopLogger)) enum numberOfWriters = 3;
+   else enum numberOfWriters = 4;
+
+   auto writers = new FileWriter[numberOfWriters];
+   foreach(aLevel; 0 .. numberOfWriters)
    {
       auto filename = text(name,
                            ".log.",
@@ -1060,7 +1358,6 @@ private struct BufferedWriter(Writer)
    private char[] _remainder;
 }
 
-// XXX check Writer
 private struct FileWriter
 {
    this(File file)
@@ -1078,117 +1375,67 @@ private struct FileWriter
    private File _file;
 }
 
-private shared InternalLogging _internal;
-
-static if(false)
+unittest
 {
-/++
-Implements an actor based logging backend.
+   foreach(i; 0 .. 10) { if(every!5) assert(i % 5 == 0); }
 
-Log messages are sent to a logging thread which is responsible for persisting log messages. Messages of a given severity will be written in the log file of that severity and in the log files of lower severity. The file names of the log files created will follow the following pattern "$(B [name]).log.$(B [level]).$(B [time])". The string $(B [name]) is the parameter $(I name) passed to $(D getCreator). The string $(B [time]) is the time when the logger was created. The string $(B [level]) is the severity of the log file. A file for severity level 'x' will contain all log messages of greater or equal severity.
-+/
-class ActorLogger : Logger
-{
-   private struct Flush {}
-
-   private this(string name)
-   {
-      _actor = spawn(&loggerMain, name);
-   }
-
-/++
-Returns a delegate for creating an ActorLogger.
-
-The method will always return a different delegate but a given delegate will always return the same $(D ActorLogger).
-
-Params:
-   name = Name to use when creating log files
-+/
-   static shared(Logger) delegate() getCreator(string name)
-   {
-      shared(Logger) creator()
-      { 
-         static Logger logger;
-         logger = logger ? logger : new ActorLogger(name);
-         return cast(shared(Logger)) logger;
-      }
-
-      return &creator;
-   }
-
-   shared void log(const ref LogMessage message)
-   {
-      LogMessage msg = message;
-      send(cast(Tid) _actor, msg);
-   }
-
-   shared void flush()
-   {
-      send(cast(Tid) _actor, thisTid, Flush());
-      receiveOnly!Flush();
-   }
-
-   private Tid _actor;
+   // different call site; should work again
+   foreach(i; 0 .. 10) { if(every!2) assert(i % 2 == 0); }
 }
 
-private void loggerMain(string name)
-{
-   BufferedWriter!FileWriter[] bufferedWriters(FileWriter[] writers)
-   {
-      auto buffers = new BufferedWriter!FileWriter[writers.length];
-      foreach(i, ref writer; writers)
-      {
-         buffers[i] = BufferedWriter!FileWriter(writer);
-      }
-
-      return buffers;
-   }
-
-   auto logger = new MultiWriter!(BufferedWriter!FileWriter)
-                                 (bufferedWriters(createFileWriters(name)));
-   auto done = false;
-
-   void log(Logger.LogMessage message)
-   {
-      logger.log(message);
-   }
-
-   void flush(Tid sender, ActorLogger.Flush flush)
-   {
-      logger.flush();
-      send(sender, flush);
-   }
-
-   void terminate(OwnerTerminated e)
-   {
-      done = true;
-   }
-
-   while(!done)
-   {
-      receive(&log, &flush, &terminate);
-   }
-}
-}
-
-// XXX unittest
 /++
 +/
-bool every(string file = __FILE__, int line = __LINE__)(uint times)
+bool every(uint times, string file = __FILE__, int line = __LINE__)()
 {
-   static uint counter;
-   if(++counter > times) counter -= times;
+   static if(times == 1) return true;
+   else
+   {
+      static uint counter;
+      if(++counter > times) counter -= times;
 
-   return counter == 1;
+      return counter == 1;
+   }
 }
 
-// XXX unittest
+unittest
+{
+   foreach(i; 0 .. 10) { assert((first() && i == 0) || i != 0); }
+
+   // different call site; should work again
+   foreach(i; 0 .. 10) { assert((first!3 && i < 3) || i >= 3); }
+}
+
 /++
 +/
-bool first(string file = __FILE__, int line = __LINE__)(uint times = 1)
+bool first(uint times = 1, string file = __FILE__, int line = __LINE__)()
 {
    static uint counter;
    if(++counter > times + 1) counter = times + 1;
 
    return counter <= times;
 }
+
+static this()
+{
+   if(is(typeof(fatal) == DefaultLogger))
+   {
+      fatal.init(Severity.fatal, &_moduleConfig);
+   }
+
+   if(is(typeof(error) == DefaultLogger))
+   {
+      error.init(Severity.error, &_moduleConfig);
+   }
+
+   if(is(typeof(warning) == DefaultLogger))
+   {
+      warning.init(Severity.warning, &_moduleConfig);
+   }
+
+   if(is(typeof(info) == DefaultLogger))
+   {
+      info.init(Severity.info, &_moduleConfig);
+   }
+}
+
+private shared ModuleConfig _moduleConfig;
