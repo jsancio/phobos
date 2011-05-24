@@ -1,4 +1,10 @@
 // Written in the D programming language.
+// XXX inspect all the try statements
+// XXX fix the API so that user doesn't need to init 
+// XXX inspect all the formattedWrite and see what could be optimized
+// XXX remove the use of text!
+// XXX Allow the configuration of the log file name
+// XXX Allow the configuration of the log line
 
 /++
 Implements application level _logging mechanism.
@@ -56,8 +62,9 @@ D = $(B$(U $0))
 module std.logging;
 
 import core.atomic : cas;
+import core.thread : Thread;
 import core.sync.mutex : Mutex;
-import std.stdio : File, writefln;
+import std.stdio : File, stderr, writefln;
 import std.string : newline;
 import std.conv : text, to;
 import std.datetime: Clock, DateTime;
@@ -66,6 +73,7 @@ import std.getopt : getopt;
 import std.process : getenv;
 import std.array : Appender, appender, array;
 import std.format : formattedWrite;
+import std.path : fnmatch, join;
 import std.algorithm : endsWith, startsWith, splitter, swap;
 
 version(unittest)
@@ -117,7 +125,6 @@ Params:
 See_Also:
    FilterConfig
 +/
-// XXX fix the API so that user doesn't need to init 
 void initLogging(ref string[] commandLine)
 {
    auto filterConfig = FilterConfig.create(commandLine);
@@ -269,15 +276,8 @@ unittest
    // assert VModuleConfig entries
    assert(filterConfig._vModuleConfigs.length == 2);
 
-   assert(filterConfig._vModuleConfigs[0]._pattern == "logging");
-   assert(filterConfig._vModuleConfigs[0]._matching ==
-          VModuleConfig.Matching.endsWith);
-   assert(filterConfig._vModuleConfigs[0]._level == 2);
-
-   assert(filterConfig._vModuleConfigs[1]._pattern == "module");
-   assert(filterConfig._vModuleConfigs[1]._matching ==
-          VModuleConfig.Matching.equals);
-   assert(filterConfig._vModuleConfigs[1]._level == 0);
+   assert(filterConfig._vModuleConfigs[0].match("std/logging.d", 2));
+   assert(filterConfig._vModuleConfigs[1].match("module.d", 0));
 
    // this(this)
    auto tempFilter = filterConfig;
@@ -419,7 +419,6 @@ unittest
 
    // logger should throw if init but module config is not init
    logInfo.init(Severity.info, &testConfig);
-   // XXX clean this
    try { logInfo.willLog; assert(false); } catch(Exception e) {}
 
    FilterConfig filterConfig;
@@ -463,7 +462,6 @@ unittest
    assert(logger.severity == Severity.error &&
           logger.message == loggedMessage);
 
-   // XXX this is ugly. Fix this test. look into using assertThrown
    logger.clear();
    try { logFatal(loggedMessage); assert(false); } catch (AssertError e) {}
    assert(logger.called);
@@ -494,7 +492,7 @@ struct DefaultLogger
       _config = config;
 
       _message.severity = severity;
-      _message.threadId = 0; // TODO: fix core.Thread's ThreadAddr property
+      _message.threadId = Thread.getThis.threadId;
    }
 
 /++
@@ -571,14 +569,13 @@ Example:
    {
       assert(willLog);
 
+      // record message
       _writer.clear(); // XXX make sure clear doesn't deallocate mem
-      foreach(T, arg; args)
-      {
-         /*if(is(T == string)) _writer.put(cast(char[])arg);
-         else */ _writer.put(to!(char[])(arg));
-      }
-
+      foreach(T, arg; args) _writer.put(to!(char[])(arg));
       message.message = _writer.data;
+
+      // record the time stamp
+      message.time = Clock.currTime.stdTime;
 
       scope(exit)
       {
@@ -601,11 +598,14 @@ Example:
    {
       assert(willLog);
 
+      // record message
       _writer.clear(); // XXX make sure clear doesn't deallocate mem
       _writer.reserve(fmt.length);
       formattedWrite(_writer, fmt, args);
-
       message.message = _writer.data;
+
+      // record the time stamp
+      message.time = Clock.currTime.stdTime;
 
       scope(exit)
       {
@@ -721,7 +721,7 @@ struct VerboseLogger
       {
          VerboseLogger vlogger;
          vlogger._message.severity = logger.severity;
-         vlogger._message.threadId = 0; // TODO: fix core.Thread's ThreadAddr
+         vlogger._message.threadId = Thread.getThis.threadId;
          vlogger._message.isVerbose = true;
          vlogger._message.verbose = level;
 
@@ -852,9 +852,7 @@ private shared struct ModuleConfig
 unittest
 {
    // Test equals
-   VModuleConfig[] configs = [ VModuleConfig("package/module",
-                                             VModuleConfig.Matching.equals,
-                                             1) ];
+   VModuleConfig[] configs = [ VModuleConfig("package/module", 1) ];
    assert(logMatches("package/module", 1, -1, configs));
    assert(logMatches("package/module.d", 1, -1, configs));
    assert(logMatches("package/module", 0, -1, configs));
@@ -862,10 +860,8 @@ unittest
    assert(!logMatches("module", 1, -1, configs));
    assert(!logMatches("package/module", 2, 3, configs));
 
-   // Test startsWith
-   configs[0]._pattern = "package";
-   configs[0]._matching = VModuleConfig.Matching.startsWith,
-   configs[0]._level = 1;
+   // Test starts with
+   configs[0] = VModuleConfig("package*", 1);
    assert(logMatches("package/module", 1, -1, configs));
    assert(logMatches("package/module.d", 1, -1, configs));
    assert(logMatches("package/module", 0, -1, configs));
@@ -875,10 +871,8 @@ unittest
    assert(!logMatches("another/package/module", 1, -1, configs));
    assert(!logMatches("package/module.d", 2, 3, configs));
 
-   // Test endsWith
-   configs[0]._pattern = "module";
-   configs[0]._matching = VModuleConfig.Matching.endsWith,
-   configs[0]._level = 1;
+   // Test ends with
+   configs[0] = VModuleConfig("*module", 1);
    assert(logMatches("package/module", 1, -1, configs));
    assert(logMatches("package/module.d", 1, -1, configs));
    assert(logMatches("package/module", 0, -1, configs));
@@ -914,20 +908,33 @@ private bool logMatches(string file,
 
 unittest
 {
-   auto result = VModuleConfig.create("module=1,*another=3,even*=2");
-   assert(result.length == 3);
-   assert(result[0]._pattern == "module");
-   assert(result[0]._matching == VModuleConfig.Matching.equals);
-   assert(result[0]._level == 1);
+   auto vmodule = "module=1,*another=3,even*=2,module?=0,*module?=1";
+   auto result = VModuleConfig.create(vmodule);
+   assert(result.length == 5);
 
-   assert(result[1]._pattern == "another");
-   assert(result[1]._matching == VModuleConfig.Matching.endsWith);
-   assert(result[1]._level == 3);
+   assert(result[0].match("module", 1));
+   assert(result[0].match("module.d", 1));
+   assert(!result[0].match("amodule", 1));
+        
+   // Test *
+   assert(result[1].match("package/another", 3));
+   assert(result[1].match("package/another.d", 3));
+   assert(!result[1].match("package/module", 3));
 
-   assert(result[2]._pattern == "even");
-   assert(result[2]._matching == VModuleConfig.Matching.startsWith);
-   assert(result[2]._level == 2);
+   assert(result[2].match("evenmore", 2));
+   assert(result[2].match("evenmore.d", 2));
+   assert(!result[2].match("package/evenmore.d", 2));
 
+   // Test ?
+   assert(result[3].match("modules.d", 0));
+   assert(!result[3].match("module", 0));
+
+   // Test * and ?
+   assert(result[4].match("package/modules.d", 1));
+   assert(!result[4].match("package/moduleis.d", 1));
+   assert(!result[4].match("package/module", 1));
+
+   // Test invalid strings
    try
    {
       VModuleConfig.create("module=2,");
@@ -948,20 +955,6 @@ unittest
       assert(false);
    }
    catch (Exception e) {}
-
-   try
-   {
-      VModuleConfig.create("module=2,ano*ther=3");
-      assert(false);
-   }
-   catch (Exception e) {}
-
-   try
-   {
-      VModuleConfig.create("module=2,*another*=3");
-      assert(false);
-   }
-   catch (Exception e) {}
 }
 
 /++
@@ -971,13 +964,6 @@ This structure is used to control verbose logging on a per module basis. A verbo
 +/
 struct VModuleConfig
 {
-   private enum Matching
-   {
-      startsWith,
-      endsWith,
-      equals
-   } 
-
 /++
 Creates an array of $(D VModuleConfig) based on a configuration string.
 
@@ -1003,38 +989,12 @@ $(DD 3. Log verbose 1 and lower messages from any file that ends with test{,.d})
       foreach(entry; splitter(config, ","))
       {
          enforce(entry != "");
+
          auto entryParts = array(splitter(entry, "="));
          enforce(entryParts.length == 2);
+         enforce(entryParts[0] != "");
 
-         auto mod = array(splitter(entryParts[0], "*"));
-         enforce(mod.length == 1 || mod.length == 2);
-         
-         auto level = to!short(entryParts[1]);
-         if(mod.length == 1 && mod[0] != "")
-         {
-            VModuleConfig vModuleConfig = VModuleConfig(mod[0],
-                                                        Matching.equals,
-                                                        level);
-            result ~= vModuleConfig;
-         }
-         else if(mod[0] != "" && mod[1] == "")
-         {
-            VModuleConfig vModuleConfig = VModuleConfig(mod[0],
-                                                        Matching.startsWith,
-                                                        level);
-            result ~= vModuleConfig;
-         }
-         else if(mod[0] == "" && mod[1] != "")
-         {
-            VModuleConfig vModuleConfig = VModuleConfig(mod[1],
-                                                        Matching.endsWith,
-                                                        level);
-            result ~= vModuleConfig;
-         }
-         else
-         {
-            enforce(false);
-         }
+         result ~= VModuleConfig(entryParts[0], to!short(entryParts[1]));
       }
 
       return result;
@@ -1044,38 +1004,28 @@ $(DD 3. Log verbose 1 and lower messages from any file that ends with test{,.d})
 
    private Match match(string file, short level) const
    { 
-      bool matched;
-      // XXX file bug against startWith/endsWith for not allowing const
-      auto pattern = cast(string) _pattern;
-
-      final switch(_matching)
+      foreach(pattern; _patterns)
       {
-         case VModuleConfig.Matching.startsWith:
-            matched = startsWith(file, pattern);
-            break;
+         if(fnmatch(file, pattern))
+         {
+            if(level <= _level) return Match.yes;
 
-         case VModuleConfig.Matching.endsWith:
-            matched = endsWith(file, pattern) ||
-                      endsWith(file, pattern ~ ".d");
-            break;
-
-         case VModuleConfig.Matching.equals:
-            matched = file == pattern || file == pattern ~ ".d";
-            break;
+            return Match.file;
+         }
       }
 
-      return matched ? level <= _level ? Match.yes : Match.file : Match.no; 
+      return Match.no;
    }
 
-   private this(string pattern, Matching matching, short level)
+   private this(string pattern, short level)
    {
-      _pattern = pattern;
-      _matching = matching;
+      _patterns[0] = pattern;
+      if(!endsWith(pattern, ".d")) _patterns[1] = pattern ~ ".d";
+
       _level = level;
    }
 
-   private string _pattern;
-   private Matching _matching;
+   private string[2] _patterns;
    private short _level;
 }
 
@@ -1091,26 +1041,41 @@ interface Logger
       Severity severity;
       int threadId;
       char[] message;
+      long time;
 
       bool isVerbose;
       short verbose;
 
       string logLine() const
       {
-         // XXX add verbose level
-         // XXX add time stamp
          auto writer = appender!string();
-         formattedWrite(writer,
-                        "%s:%d:%s:%d %s%s",
-                        file,
-                        line,
-                        severityNames[severity],
-                        threadId,
-                        message,
-                        newline);
+
+         if(isVerbose) formattedWrite(writer,
+                                      verboseFormat,
+                                      file,
+                                      line,
+                                      verbose,
+                                      threadId,
+                                      time,
+                                      message,
+                                      newline);
+         else formattedWrite(writer,
+                             severityFormat,
+                             file,
+                             line,
+                             severityNames[severity],
+                             threadId,
+                             time,
+                             message,
+                             newline);
+
 
          return writer.data;
       }
+
+      static string severityFormat = "%s:%s:%s:%x:%x %s%s";
+      static string verboseFormat = "%s:%s:VLOG(%s):%x:%x %s%s";
+
    }
 
 /++
@@ -1205,43 +1170,84 @@ public struct LoggerConfig
    }
    @property string logDirectory() { return _logDirectory; }
 
+   @property void bufferSize(size_t bufferSize) { _bufferSize = bufferSize; }
+   @property size_t bufferSize() { return _bufferSize; }
+
 
    private string _loggerName;
    private bool _logToStderr;
    private Severity _stderrThreshold = Severity.error;
    private string _logDirectory;
+   private size_t _bufferSize = 4 * 1024;
 }
 
 /++
 +/
-// XXX Allow the configuration of the log file name
-// XXX Use LoggerConfig
 class SharedLogger : Logger
 {
    private this(LoggerConfig loggerConfig)
    {
-      BufferedWriter!FileWriter[] bufferedWriters(FileWriter[] writers)
-      {
-         auto buffers = new BufferedWriter!FileWriter[writers.length];
-         foreach(i, ref writer; writers)
-         {
-            buffers[i] = BufferedWriter!FileWriter(writer);
-         }
+      enforce(loggerConfig.loggerName);
 
-         return buffers;
+      auto time = cast(DateTime) Clock.currTime();
+
+      // Create file for every severity 
+      static if(is(typeof(fatal) == NoopLogger)) enum staticWriters = 0;
+      else static if(is(typeof(error) == NoopLogger)) enum staticWriters = 1;
+      else static if(is(typeof(warning) == NoopLogger)) enum staticWriters = 2;
+      else static if(is(typeof(info) == NoopLogger)) enum staticWriters = 3;
+      else enum staticWriters = 4;
+
+      // Add one more for stderr
+      auto numberOfWriters = staticWriters == 0 ? 0 : staticWriters + 1;
+
+      _writers = new File[numberOfWriters];
+      if(_writers.length)
+      {
+         // add stderr if we are going to log
+         assert(_writers.length > 1);
+         _writers[$ - 1] = stderr;
       }
 
-      _writers = createFileWriters(loggerConfig.loggerName);
+      // create the file name for all the writers
+      foreach(severity; 0 .. numberOfWriters - 1)
+      {
+         _filenames ~= join(loggerConfig.logDirectory,
+                            text(loggerConfig.loggerName,
+                                 ".log.",
+                                 severityNames[severity],
+                                 ".",
+                                 time.toISOString()));
+      }
+      _filenames ~= ""; // empty string represent stderr
+
+      // create the indices for all the loggers
+      _indices = new size_t[][staticWriters];
+      foreach(i, ref index; _indices)
+      {
+         foreach(j; i .. staticWriters) index ~= j;
+         if(loggerConfig.logToStderr && i <= loggerConfig.stderrThreshold)
+         {
+            index ~= _writers.length - 1;
+         }
+      }
+
       _mutex = new Mutex;
+      _bufferSize = loggerConfig.bufferSize;
    }
 
    shared void log(const ref LogMessage message)
    {
       synchronized(_mutex)
       {
-         foreach(i, ref writer; _writers)
+         foreach(i; _indices[message.severity]) 
          {
-            if(i >= message.severity) writer.put(message.logLine());
+            if(!_writers[i].isOpen)
+            {
+               _writers[i].open(_filenames[i], "w");
+               _writers[i].setvbuf(_bufferSize);
+            }
+            _writers[i].write(message.logLine());
          }
       }
    }
@@ -1250,129 +1256,18 @@ class SharedLogger : Logger
    {
       synchronized(_mutex)
       {
-         foreach(ref writer; _writers)
+         foreach(ref writer; _writers[0 .. $ - 1])
          {
-            writer.flush();
+            if(writer.isOpen) writer.flush();
          }
       }
    }
 
+   private size_t _bufferSize;
    private Mutex _mutex;
-   __gshared FileWriter[] _writers;
-}
-
-private FileWriter[] createFileWriters(string name)
-{
-   auto time = cast(DateTime) Clock.currTime();
-
-   // Create file for every severity 
-   static if(is(typeof(fatal) == NoopLogger)) enum numberOfWriters = 0;
-   else static if(is(typeof(error) == NoopLogger)) enum numberOfWriters = 1;
-   else static if(is(typeof(warning) == NoopLogger)) enum numberOfWriters = 2;
-   else static if(is(typeof(info) == NoopLogger)) enum numberOfWriters = 3;
-   else enum numberOfWriters = 4;
-
-   auto writers = new FileWriter[numberOfWriters];
-   foreach(aLevel; 0 .. numberOfWriters)
-   {
-      auto filename = text(name,
-                           ".log.",
-                           severityNames[aLevel],
-                           ".",
-                           time.toISOString());
-      writers[aLevel] = FileWriter(File(filename, "w"));
-   }
-
-   return writers;
-}
-
-unittest
-{
-   auto writer = appender!(char[])();
-   size_t size = 1024;
-   auto buffer = BufferedWriter!(typeof(writer))(writer, size);
-
-   // check that internal writer is not called
-   auto smallMsg = "1234567890";
-   buffer.put(smallMsg);
-   assert(writer.data == "");
-
-   // check that internal writer is called when buffer overflows
-   auto bigMsg = replicate("a", size - 5);
-   buffer.put(bigMsg);
-   assert(startsWith(writer.data, smallMsg[0 .. 3]));
-
-   // check that everything is written when flush is called
-   buffer.flush();
-   assert(writer.data[0 .. smallMsg.length] == smallMsg);
-   assert(writer.data[smallMsg.length .. $] == bigMsg);
-
-   // check that messages bigger than the buffer are also written
-   writer.clear();
-   auto reallyBigMsg = replicate("b", size + 5);
-   buffer.put(reallyBigMsg);
-   buffer.flush();
-   assert(writer.data == reallyBigMsg);
-}
-
-// XXX check Writer
-private struct BufferedWriter(Writer)
-{
-   this(Writer writer, size_t bufferSize = 1024 * 4)
-   {
-      _writer = writer;
-      _remainder = _buffer = new char[bufferSize];
-   }
-
-   // XXX implement this(this)
-
-   void put(string msg)
-   {
-      if(_buffer is _remainder &&  _remainder.length <= msg.length)
-      {
-         // the message will never fit just write it
-         _writer.put(msg);
-      }
-      else if(_remainder.length > msg.length)
-      {
-         // there is enough space so buffer the message
-         _remainder[0 .. msg.length] = msg;
-         _remainder = _remainder[msg.length .. $];
-      }
-      else
-      {
-         // not enought space: flush and log
-         flush();
-         put(msg);
-      }
-   }
-
-   void flush()
-   {
-      _writer.put(_buffer[0 .. $ - _remainder.length]);
-      _remainder = _buffer;
-   }
-
-   private Writer _writer;
-   private char[] _buffer;
-   private char[] _remainder;
-}
-
-private struct FileWriter
-{
-   this(File file)
-   {
-      _file = file;
-   }
-
-   void put(const char[] msg)
-   {
-      _file.write(msg);
-   }
-
-   void flush() {}
-
-   private File _file;
+   private string[] _filenames;
+   private size_t[][] _indices;
+   __gshared File[] _writers;
 }
 
 unittest
