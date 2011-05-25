@@ -1,24 +1,28 @@
 // Written in the D programming language.
 // XXX inspect all the try statements
-// XXX fix the API so that user doesn't need to init 
 // XXX inspect all the formattedWrite and see what could be optimized
 // XXX remove the use of text!
 // XXX Allow the configuration of the log file name
 // XXX Allow the configuration of the log line
+// XXX write unittest for SharedLogger
+// XXX write unittest for first, every, etc
+// XXX implement a time version of first, every, etc
+// XXX rename module
 
 /++
 Implements application level _logging mechanism.
 
-This module defines a set of functions useful for many common _logging tasks.  The module must be initialized (ideally in single threaded mode) by calling $(D initializeLogging). Messages of different severity level are logged by calling the template function $(D log). Verbose messages can be logged by calling the template function $(D vlog).
+This module defines a set of functions useful for many common _logging tasks.
+Messages of different severity level are logged by using the objects $(D fatal),
+$(D dfatal), $(D error), $(D warning) and $(D info). Verbose messages can be
+logged by calling the function $(D vlog).
 
 Examples:
 ---
-import std.logging;
+import std.log;
 
-int main(string[] args)
+void main(string[] args)
 {
-   initLogging(SharedLogger.getCreator(args[0]));
-
    info.format("You passed %s argument(s)", args.length - 1);
    info.when(args.length > 1)("Arguments: ", args[1 .. $]);
 
@@ -52,18 +56,16 @@ int main(string[] args)
 ---
 
 Note:
-Compile time disabling of severity levels can be done by defining the LOGGING_FATAL_DISABLED, LOGGING_ERROR_DISABLED, LOGGING_WARNING_DISABLED or LOGGING_INFO_DISABLED version. Disabiliting a higher severity level will disable all the lower severity level. E.g. LOGGING_WARNING_DISABLED will disable warning and info serverity levels at compile time and enable the fatal and error serverity level.
+Compile time disabling of severity levels can be done by defining the strip_log_fatal, strip_log_error, strip_log_warning or strip_log_info compile version. Disabiliting a higher severity level will disable all the lower severity levels. E.g. strip_log_warning will disable warning and info serverity levels at compile time and enable the fatal and error serverity level.
 
-Verbose messages are logged at the info severity level so using LOGGING_INFO_DISABLED will also disable versbose messages.
-
-Macros:
-D = $(B$(U $0))
+Verbose messages are logged at the info severity level so using strip_log_info will also disable versbose messages.
 +/
 module std.logging;
 
 import core.atomic : cas;
 import core.thread : Thread;
 import core.sync.mutex : Mutex;
+import core.runtime : Runtime;
 import std.stdio : File, stderr, writefln;
 import std.string : newline;
 import std.conv : text, to;
@@ -86,44 +88,57 @@ version(unittest)
 /++
 Defines the severity levels supported by the logging library.
 
-Logging messages of severity level fatal will also cause the program to halt. The dfatal severity will log at a fatal severity in debug mode and at a error severity in release mode.
+Logging messages of severity level fatal will also cause the program to halt.
+The dfatal severity will log at a fatal severity in debug mode and at a error
+severity in release mode.
 +/
 enum Severity
 {
-   fatal = 0,
-   error,
-   warning,
-   info
+   fatal = 0, ///
+   error, /// ditto
+   warning, /// ditto
+   info /// ditto
 }
 
+///
 immutable string[] severityNames = [ "FATAL", "ERROR", "WARNING", "INFO" ];
 
+///
 version(strip_log_fatal) NoopLogger fatal;
 else DefaultLogger fatal;
-
+///
 version(strip_log_error) NoopLogger error;
 else typeof(fatal) error;
-
+///
 version(strip_log_warning) NoopLogger warning;
 else typeof(error) warning;
-
+///
 version(strip_log_info) NoopLogger info;
 else typeof(warning) info;
-
+///
 debug alias fatal dfatal;
 else alias error dfatal;
 
 /++
-Initializes the logging infrastructure.
+Initialize the logging infrastructure.
 
-This function must be called once before calling any of the logging functions.
+A call to these functions is not required if the module will be initialized
+only by looking at the command line arguments. These functions will throw if
+they are called after a logging call has been made.
 
-Params:
-   logCreator = Delegate which creates the Logger used by the module.
-   filterConfig = Module configuration object. 
+$(D initLogging) will treat the parameter $(D commandLine) as the command line
+arguments to this process. Every valid option to this module will be removed 
+from the passed slice. For list of command line options see $(D FilterConfig)
+and $(D LoggerConfig).
 
+$(D initializeLogging) should be used when configuring the backend logger to a
+different $(D Logger). Type $(D T) is the type of the logger to instanciate.
+$(D loggerConfig) is the configuration object used by the logger.
+$(D filterConfig) is the configuration object used by $(D std.log).
+   
 See_Also:
    FilterConfig
+   Logger
 +/
 void initLogging(ref string[] commandLine)
 {
@@ -132,59 +147,15 @@ void initLogging(ref string[] commandLine)
 
    initializeLogging!SharedLogger(loggerConfig, filterConfig);
 }
-
+/// ditto
 void initializeLogging(T : Logger, BC)
                       (BC loggerConfig,
                        FilterConfig filterConfig = FilterConfig())
 {
-   auto logger = new T(loggerConfig);
-   _moduleConfig.init(logger, filterConfig);
+   filterConfig._logger = cast(shared) new T(loggerConfig);
+   _moduleConfig.init(filterConfig);
 }
 
-/++
-Logs a message.
-
-Returns a structure for logging messages at the specified severity.
-Example:
----
-   log!error.write("Log an ", severityNames[error], " message!");
-   log!error.format("Also logs an %s message!", severityNames[error]);
----
-
-You can also performed conditional logging.
-Example:
-
-
----
-   void coolFunction(Object object)
-   {
-      log!fatal(object is null).write("I don't like null objects!");
-      // ...
-   }
-
-   foreach(i; 0 .. 10)
-   {
-      log!info(first).write("Only log this the first time in the loop");
-   }
----
-
-The returned object can be reused.
-Example:
----
-   auto logger = log!warning;
-   with(logger)
-   {
-      if(willLog)
-      {
-         auto message = "A complex message...";
-         // Continue constructing 'message'...
-
-         write(message);
-      }
-   }
----
-
-+/
 
 /++
 Logs a verbose message.
@@ -192,7 +163,7 @@ Logs a verbose message.
 Returns a structure for logging messages at the specified verbose level.
 Example:
 ---
-   vlog(0).write("Log a verbose ", 0, " message!");
+   vlog(0)("Log a verbose ", 0, " message!");
    vlog(2).format("Also logs a verbose %s message!", 0);
 ---
 
@@ -201,7 +172,7 @@ Example:
 ---
    foreach(i; 0 .. 10)
    {
-      vlog(3, first).write("Only log this the first time in the loop");
+      vlog(3).when(first)("Only log this the first time in the loop");
    }
 ---
 
@@ -372,6 +343,7 @@ This function will be called by the thread trying to log a fatal message by usin
    private short _maxVerboseLevel = short.min;
    private VModuleConfig[] _vModuleConfigs;
    private void function() _fatalHandler;
+   private shared Logger _logger;
 }
 
 version(unittest)
@@ -417,16 +389,17 @@ unittest
    // logger shouldn't log if not init
    assert(!logInfo.willLog);
 
-   // logger should throw if init but module config is not init
+   // logger shouldn't log if module configured
    logInfo.init(Severity.info, &testConfig);
-   try { logInfo.willLog; assert(false); } catch(Exception e) {}
+   assert(!logInfo.willLog);
 
    FilterConfig filterConfig;
    filterConfig.maxSeverity = Severity.warning;
 
    auto logger = cast(shared) new SeverityFilter();
+   filterConfig._logger = logger;
 
-   testConfig.init(logger, filterConfig);
+   testConfig.init(filterConfig);
 
    logWarning.init(Severity.warning, &testConfig);
    logError.init(Severity.error, &testConfig);
@@ -485,6 +458,33 @@ unittest
    assert(!logError.when(false).willLog);
 }
 
+/++
+Logs a message.
+
+Returns a structure for logging messages at the specified severity.
+Example:
+---
+   error("Log an ", severityNames[error], " message!");
+   error.format("Also logs an %s message!", severityNames[error]);
+---
+
+You can also performed conditional logging.
+Example:
+
+
+---
+   void coolFunction(Object object)
+   {
+      fatal(object is null)("I don't like null objects!");
+      // ...
+   }
+
+   foreach(i; 0 .. 10)
+   {
+      info.when(first)("Only log this the first time in the loop");
+   }
+---
++/
 struct DefaultLogger
 {
    private void init(Severity severity, shared(ModuleConfig)* config)
@@ -500,8 +500,8 @@ Returns true when write and format will lead to a message being logged.
 +/
    @property bool willLog() const
    {
-      enforce(_config is null || (cast(shared)_config).isInitialized);
-      return _config !is null && _message.severity <= (cast(shared)_config).severity;
+      return _config !is null &&
+             _message.severity <= (cast(shared)_config).severity;
    }
 
 /++
@@ -520,11 +520,10 @@ Example:
 ---
    auto pi = 3.14159265;
 
-   auto logger = log!info;
-   logger.write("The value of pi is ", pi);
+   info.write("The value of pi is ", pi);
 
    // The same as above...
-   log!info.write("The value of pi is ", pi);
+   info("The value of pi is ", pi);
 ---
 +/
    void opCall(string file = __FILE__, int line = __LINE__, T...)(lazy T args)
@@ -547,11 +546,7 @@ Example:
 ---
    auto goldenRatio = 1.61803399;
 
-   auto logger = log!info;
-   logger.format("The number %s is the golden ratio", goldenRatio);
-
-   // The same as above...
-   log!info.format("The number %s is the golden ratio", goldenRatio);
+   info.format("The number %s is the golden ratio", goldenRatio);
 ---
 +/
    void format(string file = __FILE__, int line = __LINE__, T...)
@@ -651,8 +646,8 @@ unittest
    logWarning.init(Severity.warning, &testConfig);
 
    // verbose logging shouldn't throw if module not init
-   try { verboseLog = VerboseLogger.create(0, testConfig, &logWarning);
-         assert(false); } catch(Exception e) {}
+   verboseLog = VerboseLogger.create(0, testConfig, &logWarning);
+   assert(!verboseLog.willLog);
 
    FilterConfig filterConfig;
    filterConfig.maxSeverity = Severity.warning;
@@ -660,8 +655,9 @@ unittest
    filterConfig.vModuleConfigs = VModuleConfig.create("*logging.d=2");
 
    auto logger = cast(shared) new SeverityFilter();
+   filterConfig._logger = logger;
 
-   testConfig.init(logger, filterConfig);
+   testConfig.init(filterConfig);
 
    // Test vlogging and module filtering
    logger.clear();
@@ -707,6 +703,7 @@ unittest
    assert(!logger.called); 
 }
 
+///
 struct VerboseLogger
 {
    private static VerboseLogger create(short level,
@@ -714,8 +711,6 @@ struct VerboseLogger
                                        DefaultLogger* logger,
                                        string file = __FILE__)
    {
-      enforce(config.isInitialized);
-
       if(logger.willLog &&
          logMatches(file, level, config.verboseLevel, config.vModuleConfigs))
       {
@@ -784,16 +779,15 @@ unittest
 
 private shared struct ModuleConfig
 {
-   void init(shared(Logger) logger,
-             FilterConfig filterConfig)
+   void init(FilterConfig filterConfig)
    {
-      enforce(logger);
-      enforce(cas(&_initializing, false, true));
-      scope(success) _initialized = true;
+      enforce(filterConfig._logger);
+      // it is a error if the user tries to init after the logger has been used
+      enforce(!_loggerUsed);
 
       _vModuleConfigs = filterConfig._vModuleConfigs.idup;
 
-      _logger = logger;
+      _logger = filterConfig._logger;
 
       _severity = filterConfig._maxSeverity;
 
@@ -804,44 +798,34 @@ private shared struct ModuleConfig
       _verboseLevel = filterConfig._maxVerboseLevel;
    }
 
-   bool isInitialized()
-   {
-      return _initialized;
-   }
-
    @property shared(Logger) logger()
    {
-      assert(_initialized);
+      // Somebody asked for the logger don't allow changing it
+      _loggerUsed = true;
       return _logger;
    }
 
    @property Severity severity()
    {
-      assert(_initialized);
       return _severity;
    }
 
    @property short verboseLevel()
    {
-      assert(_initialized);
       return _verboseLevel;
    }
 
    @property immutable(VModuleConfig)[] vModuleConfigs()
    {
-      assert(_initialized);
       return _vModuleConfigs;
    }
 
    @property void function() fatalHandler()
    {
-      assert(_initialized);
       return _fatalHandler;
    }
 
-   private bool _initializing;
-   private bool _initialized;
-
+   private bool _loggerUsed;
    private Logger _logger;
    private Severity _severity;
    private short _verboseLevel;
@@ -1123,6 +1107,7 @@ unittest
    assert(loggerConfig.logDirectory == "/tmp");
 }
 
+///
 public struct LoggerConfig
 {
    static string logToStderrFlag = "logtostderr";
@@ -1189,7 +1174,8 @@ class SharedLogger : Logger
    {
       enforce(loggerConfig.loggerName);
 
-      auto time = cast(DateTime) Clock.currTime();
+      _loggerConfig = loggerConfig;
+      _mutex = new Mutex;
 
       // Create file for every severity 
       static if(is(typeof(fatal) == NoopLogger)) enum staticWriters = 0;
@@ -1202,6 +1188,28 @@ class SharedLogger : Logger
       auto numberOfWriters = staticWriters == 0 ? 0 : staticWriters + 1;
 
       _writers = new File[numberOfWriters];
+
+      // create the indices for all the loggers
+      _indices = new size_t[][staticWriters];
+      foreach(i, ref index; _indices)
+      {
+         foreach(j; i .. staticWriters) index ~= j;
+         if(_loggerConfig.logToStderr && i <= _loggerConfig.stderrThreshold)
+         {
+            index ~= _writers.length - 1;
+         }
+      }
+   }
+
+   private shared void init()
+   {
+      if(_initialized) return;
+
+      scope(success) _initialized = true;
+
+      auto time = cast(DateTime) Clock.currTime();
+
+      // Add stderr
       if(_writers.length)
       {
          // add stderr if we are going to log
@@ -1210,42 +1218,29 @@ class SharedLogger : Logger
       }
 
       // create the file name for all the writers
-      foreach(severity; 0 .. numberOfWriters - 1)
+      foreach(severity; 0 .. _writers.length - 1)
       {
-         _filenames ~= join(loggerConfig.logDirectory,
-                            text(loggerConfig.loggerName,
+         _filenames ~= join(_loggerConfig.logDirectory,
+                            text(_loggerConfig.loggerName,
                                  ".log.",
                                  severityNames[severity],
                                  ".",
                                  time.toISOString()));
       }
       _filenames ~= ""; // empty string represent stderr
-
-      // create the indices for all the loggers
-      _indices = new size_t[][staticWriters];
-      foreach(i, ref index; _indices)
-      {
-         foreach(j; i .. staticWriters) index ~= j;
-         if(loggerConfig.logToStderr && i <= loggerConfig.stderrThreshold)
-         {
-            index ~= _writers.length - 1;
-         }
-      }
-
-      _mutex = new Mutex;
-      _bufferSize = loggerConfig.bufferSize;
    }
 
    shared void log(const ref LogMessage message)
    {
       synchronized(_mutex)
       {
+         init();
          foreach(i; _indices[message.severity]) 
          {
             if(!_writers[i].isOpen)
             {
                _writers[i].open(_filenames[i], "w");
-               _writers[i].setvbuf(_bufferSize);
+               _writers[i].setvbuf(_loggerConfig.bufferSize);
             }
             _writers[i].write(message.logLine());
          }
@@ -1256,6 +1251,7 @@ class SharedLogger : Logger
    {
       synchronized(_mutex)
       {
+         init();
          foreach(ref writer; _writers[0 .. $ - 1])
          {
             if(writer.isOpen) writer.flush();
@@ -1263,7 +1259,9 @@ class SharedLogger : Logger
       }
    }
 
-   private size_t _bufferSize;
+   private __gshared LoggerConfig _loggerConfig;
+   private bool _initialized;
+
    private Mutex _mutex;
    private string[] _filenames;
    private size_t[][] _indices;
@@ -1331,6 +1329,12 @@ static this()
    {
       info.init(Severity.info, &_moduleConfig);
    }
+}
+
+shared static this()
+{
+   auto args = Runtime.args;
+   initLogging(args);
 }
 
 private shared ModuleConfig _moduleConfig;
