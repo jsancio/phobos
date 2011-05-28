@@ -309,7 +309,7 @@ unittest
 Conditionally records a log message by checking the severity level and any user
 defined condition.
 
-Example:
+Examples:
 ---
 error("Log an ", to!string(Level.error), " message!");
 error.write("Log an ", to!string(Level.error), " message!");
@@ -317,7 +317,6 @@ error.format("Also logs an %s message!", to!string(Level.error));
 ---
 Logs a message if the specified severity level is enabled.
 
-Example:
 ---
 void coolFunction(Object object)
 {
@@ -1099,7 +1098,7 @@ public struct LoggerConfig
    }
 
    /// Name to use when generating log file names.
-   @property string loggerName() { return _loggerName; }
+   @property const string loggerName() { return _loggerName; }
 
    /++
       Specifies if the logger should write to stderr. If this property is set,
@@ -1108,7 +1107,7 @@ public struct LoggerConfig
       The default value is false.
     +/
    @property void logToStderr(bool logToStderr) { _logToStderr = logToStderr; }
-   @property bool logToStderr() { return _logToStderr; } /// ditto
+   @property const bool logToStderr() { return _logToStderr; } /// ditto
 
    /++
       Specifies if the logger should write to stderr. If this property is set,
@@ -1120,7 +1119,7 @@ public struct LoggerConfig
    {
       _alsoLogToStderr = alsoLogToStderr;
    }
-   @property bool alsoLogToStderr() { return _alsoLogToStderr; } /// ditto
+   @property const bool alsoLogToStderr() { return _alsoLogToStderr; } /// ditto
 
    /++
       Specifies the _threshold at which log messages are logged to stderr. Any
@@ -1132,7 +1131,11 @@ public struct LoggerConfig
    {
       _stderrThreshold = threshold;
    }
-   @property Severity stderrThreshold() { return _stderrThreshold; } /// ditto
+   /// ditto
+   @property const Severity stderrThreshold()
+   {
+      return _stderrThreshold;
+   }
 
    /++
       Specifies the directory where log files are created.
@@ -1145,7 +1148,7 @@ public struct LoggerConfig
    {
       _logDirectory = logDirectory;
    }
-   @property string logDirectory() { return _logDirectory; } /// ditto
+   @property const string logDirectory() { return _logDirectory; } /// ditto
 
    /++
       Specifies the buffer size for each log file.
@@ -1153,7 +1156,7 @@ public struct LoggerConfig
       The default value is 4KB.
     +/
    @property void bufferSize(size_t bufferSize) { _bufferSize = bufferSize; }
-   @property size_t bufferSize() { return _bufferSize; } /// ditto
+   @property const size_t bufferSize() { return _bufferSize; } /// ditto
 
    private string _loggerName;
    private bool _logToStderr;
@@ -1205,10 +1208,10 @@ This function allows the caller to change and configure the the backend logger
 to a different $(D Logger).
 
 Params:
-   T - The type of the $(D Logger) to instanciate.
-   loggerConfig - The configuration object used by the logger. It will be
+   T = The type of the $(D Logger) to instanciate.
+   loggerConfig = The configuration object used by the logger. It will be
                   passed to $(D T)'s constructor.
-   filterConfig - The configuration object used by $(D std.log).
+   filterConfig = The configuration object used by $(D std.log).
 
 Example:
 ---
@@ -1309,7 +1312,7 @@ class SharedLogger : Logger
       
       This constructor is required by $(D initializeLogging).
     +/
-   private this(LoggerConfig loggerConfig)
+   private this(const ref LoggerConfig loggerConfig)
    {
       enforce(loggerConfig.loggerName);
 
