@@ -1,16 +1,12 @@
 // Written in the D programming language.
-// XXX replace VerboseLogger with DefaultLogger
-// XXX unittest that DefaultLogger and NoopLogger implement the same methods.
 // XXX rename module
-// XXX fix's ModuleConfig's concurrency issues. Use a read-write lock.
 // XXX write unittest for SharedLogger
-
-// XXX inspect all the try statements
-// XXX inspect all the formattedWrite and see what could be optimized
-// XXX remove the use of text!
-// XXX Allow the configuration of the log file name
-// XXX Allow the configuration of the log line
 // XXX make sure that the examples are correct.
+
+// TODO inspect all the try statements
+// TODO remove the use of text!
+// TODO Allow the configuration of the log file name
+// TODO Allow the configuration of the log line
 
 /++
 Implements an application level _logging mechanism.
@@ -83,13 +79,15 @@ void main(string[] args)
 ---
 
 BUGS:
-Not tested on Windows.
+Not tested on Windows. Log messages do not contain the logging thread when 
+using vanilla druntime.
 +/
 module std.logging;
 
 import core.atomic : cas;
 import core.thread : Thread;
 import core.sync.mutex : Mutex;
+import core.sync.rwmutex : ReadWriteMutex;
 import core.runtime : Runtime;
 import core.time : Duration;
 import std.stdio : File, stderr, writefln;
@@ -126,7 +124,7 @@ version(StdDdoc)
 fatal("A fatal message!");
       ---
     +/
-   DefaultLogger fatal;
+   LogFilter fatal;
 
    /++
       Debug fatal log messages log at fatal severity in debug mode and log at
@@ -138,7 +136,7 @@ fatal("A fatal message!");
 dfatal("A fatal message in debug and an error message in release!");
       ---
     +/
-   DefaultLogger dfatal;
+   LogFilter dfatal;
 
    /++
       Error log messages are disabled at compiled time by setting the version
@@ -152,7 +150,7 @@ dfatal("A fatal message in debug and an error message in release!");
 error("An error message!");
       ---
     +/
-   DefaultLogger error;
+   LogFilter error;
 
    /++
       Warning log messages are disabled at compiled time by setting the version
@@ -166,7 +164,7 @@ error("An error message!");
 warning("A warning message!");
       ---
     +/
-   DefaultLogger warning;
+   LogFilter warning;
 
    /++
       Info log messages are disabled at compiled time by setting the version to
@@ -180,7 +178,7 @@ warning("A warning message!");
 info("An info message!");
       ---
     +/
-   DefaultLogger info;
+   LogFilter info;
 
    /++
       Verbose log messages are log at the info severity _level. To disable them
@@ -194,55 +192,52 @@ info("An info message!");
 vlog(1)("A verbose 1 message");
       ---
     +/
-   VerboseLogger vlog(short level, string file = __FILE__);
+   LogFilter vlog(short level, string file = __FILE__);
 }
 else
 {
-   version(strip_log_fatal) NoopLogger fatal;
-   else DefaultLogger fatal;
+   version(strip_log_fatal) NoopLogFilter fatal;
+   else LogFilter fatal;
 
-   version(strip_log_error) NoopLogger error;
+   version(strip_log_error) NoopLogFilter error;
    else typeof(fatal) error;
 
-   version(strip_log_warning) NoopLogger warning;
+   version(strip_log_warning) NoopLogFilter warning;
    else typeof(error) warning;
 
-   version(strip_log_info) NoopLogger info;
+   version(strip_log_info) NoopLogFilter info;
    else typeof(warning) info;
 
    debug alias fatal dfatal;
    else alias error dfatal;
 
-   static if(is(typeof(info) == NoopLogger))
+   ref typeof(info) vlog(short level, string file = __FILE__)
    {
-      ref NoopLogger vlog(short level, string file = __FILE__)
+      static if(is(typeof(return) == NoopLogFilter))
       {
          return info;
       }
-   }
-   else
-   {
-      VerboseLogger vlog(short level, string file = __FILE__)
+      else
       {
-         return VerboseLogger.create(level, _moduleConfig, &info, file);
+         return LogFilter.vlog(level, _moduleConfig, &info, file);
       }
    }
 }
 
 unittest
 {
-   DefaultLogger logInfo;
-   DefaultLogger logWarning;
-   DefaultLogger logError;
-   DefaultLogger logFatal;
+   LogFilter logInfo;
+   LogFilter logWarning;
+   LogFilter logError;
+   LogFilter logFatal;
 
-   ModuleConfig testConfig;
+   auto testConfig = new ModuleConfig;
 
    // logger shouldn't log if not init
    assert(!logInfo.willLog);
 
    // logger shouldn't log if module configured
-   logInfo.init(Severity.info, &testConfig);
+   logInfo.init(Severity.info, testConfig);
    assert(!logInfo.willLog);
 
    FilterConfig filterConfig;
@@ -253,9 +248,9 @@ unittest
 
    testConfig.init(filterConfig);
 
-   logWarning.init(Severity.warning, &testConfig);
-   logError.init(Severity.error, &testConfig);
-   logFatal.init(Severity.fatal, &testConfig);
+   logWarning.init(Severity.warning, testConfig);
+   logError.init(Severity.error, testConfig);
+   logFatal.init(Severity.fatal, testConfig);
 
    auto loggedMessage = "logged message";
 
@@ -338,14 +333,17 @@ foreach(i; 0 .. 10)
 Logs a message if the specified severity level is enabled and all the user
 defined condition are true.
 +/
-struct DefaultLogger
+struct LogFilter
 {
-   private void init(Severity severity, shared(ModuleConfig)* config)
+   private void init(Severity severity, ModuleConfig config)
    {
       _config = config;
 
       _message.severity = severity;
-      _message.threadId = Thread.getThis.threadId;
+      static if(__traits(hasMember, Thread, "threadId"))
+      {
+         _message.threadId = Thread.getThis.threadId;
+      }
    }
 
    /++
@@ -362,10 +360,10 @@ if(error.willLog)
 }
       ---
     +/
-   @property bool willLog() const
+   @property bool willLog()
    {
       return _config !is null &&
-             _message.severity <= (cast(shared)_config).severity;
+             _message.severity <= _config.severity;
    }
 
    /++
@@ -377,16 +375,16 @@ if(error.willLog)
       ---
 foreach(i; 0 .. 10)
 {
-   info.when(i == 9)("Executed loop when i = 9");
+   warning.when(i == 9)("Executed loop when i = 9");
    // ...
 }
       ---
     +/
-   ref DefaultLogger when(lazy bool now)
+   ref LogFilter when(lazy bool now)
    {
       if(willLog && now) return this;
 
-      return _noopLogger;
+      return _noopLogFilter;
    }
    
    /++
@@ -426,7 +424,7 @@ info("The value of pi is ", pi);
       ---
 auto goldenRatio = 1.61803399;
 
-info.format("The number %s is the golden ratio", goldenRatio);
+vlog(1).format("The number %s is the golden ratio", goldenRatio);
       ---
     +/
    void format(string file = __FILE__, int line = __LINE__, T...)
@@ -445,7 +443,7 @@ info.format("The number %s is the golden ratio", goldenRatio);
       assert(willLog);
 
       // record message
-      _writer.clear(); // XXX make sure clear doesn't deallocate mem
+      _writer.clear();
       foreach(T, arg; args) _writer.put(to!(char[])(arg));
       message.message = _writer.data;
 
@@ -474,7 +472,7 @@ info.format("The number %s is the golden ratio", goldenRatio);
       assert(willLog);
 
       // record message
-      _writer.clear(); // XXX make sure clear doesn't deallocate mem
+      _writer.clear();
       _writer.reserve(fmt.length);
       formattedWrite(_writer, fmt, args);
       message.message = _writer.data;
@@ -499,197 +497,120 @@ info.format("The number %s is the golden ratio", goldenRatio);
       _config.logger.log(message);
    }
 
-   private @property Severity severity()
+   unittest
    {
-      assert(_config); // the severity is invalid if it was never initialized
-      return _message.severity;
+      auto loggedMessage = "Verbose log message";
+
+      LogFilter logInfo;
+      LogFilter logWarning;
+      auto testConfig = new ModuleConfig;
+
+      logInfo.init(Severity.info, testConfig);
+      logWarning.init(Severity.warning, testConfig);
+
+      // verbose logging shouldn't throw if module not init
+      auto verboseLog = LogFilter.vlog(0, testConfig, &logWarning);
+      assert(!verboseLog.willLog);
+
+      FilterConfig filterConfig;
+      filterConfig.minSeverity = Severity.warning;
+      filterConfig.verboseConfig.maxVerboseLevel = 3;
+      filterConfig.verboseConfig.moduleFilter = "*logging.d=2";
+
+      auto logger = cast(shared) new SeverityFilter();
+      filterConfig._logger = logger;
+
+      testConfig.init(filterConfig);
+
+      // Test vlogging and module filtering
+      logger.clear();
+      verboseLog = LogFilter.vlog(2, testConfig, &logWarning);
+      assert(verboseLog.willLog);
+      verboseLog(loggedMessage);
+      assert(logger.called);
+      assert(logger.severity == Severity.warning &&
+            logger.message == loggedMessage);
+
+      // test format
+      logger.clear();
+      verboseLog.format("%s", loggedMessage);
+      assert(logger.called);
+      assert(logger.severity == Severity.warning &&
+            logger.message == loggedMessage);
+
+      // test large verbose level
+      logger.clear();
+      verboseLog = LogFilter.vlog(3, testConfig, &logWarning);
+      verboseLog(loggedMessage);
+      assert(!logger.called);
+
+      // test wrong module
+      logger.clear();
+      verboseLog = LogFilter.vlog(4, testConfig, &logWarning, "not_this");
+      verboseLog.format("%s", loggedMessage);
+      assert(!logger.called); 
+
+      // test verbose level
+      logger.clear();
+      verboseLog = LogFilter.vlog(3, testConfig, &logWarning, "not_this");
+      verboseLog.format("%s", loggedMessage);
+      assert(logger.called); 
+      assert(logger.severity == Severity.warning &&
+            logger.message == loggedMessage);
+
+      // test severity config too high
+      logger.clear();
+      verboseLog = LogFilter.vlog(2, testConfig, &logInfo);
+      assert(!verboseLog.willLog);
+      verboseLog.format("%s", loggedMessage);
+      assert(!logger.called); 
+   }
+
+   private static ref LogFilter vlog(short level,
+                                     ModuleConfig config,
+                                     LogFilter* logger,
+                                     string file = __FILE__)
+   {
+      if(logger.willLog && config.matchesVerboseConfig(file, level))
+      {
+         return *logger;
+      }
+
+      return _noopLogFilter;
    }
 
    private Logger.LogMessage _message;
    private Appender!(char[]) _writer;
 
-   private shared ModuleConfig* _config;
+   private ModuleConfig _config;
 
-   private static __gshared DefaultLogger _noopLogger;
+   private static __gshared LogFilter _noopLogFilter;
 }
 
 unittest
 {
-   auto loggedMessage = "Verbose log message";
-
-   DefaultLogger logInfo;
-   DefaultLogger logWarning;
-   VerboseLogger verboseLog;
-   ModuleConfig testConfig;
-
-   logInfo.init(Severity.info, &testConfig);
-   logWarning.init(Severity.warning, &testConfig);
-
-   // verbose logging shouldn't throw if module not init
-   verboseLog = VerboseLogger.create(0, testConfig, &logWarning);
-   assert(!verboseLog.willLog);
-
-   FilterConfig filterConfig;
-   filterConfig.minSeverity = Severity.warning;
-   filterConfig.verboseConfig.maxVerboseLevel = 3;
-   filterConfig.verboseConfig.moduleFilter = "*logging.d=2";
-
-   auto logger = cast(shared) new SeverityFilter();
-   filterConfig._logger = logger;
-
-   testConfig.init(filterConfig);
-
-   // Test vlogging and module filtering
-   logger.clear();
-   verboseLog = VerboseLogger.create(2, testConfig, &logWarning);
-   assert(verboseLog.willLog);
-   verboseLog(loggedMessage);
-   assert(logger.called);
-   assert(logger.severity == Severity.warning &&
-          logger.message == loggedMessage);
-
-   // test format
-   logger.clear();
-   verboseLog.format("%s", loggedMessage);
-   assert(logger.called);
-   assert(logger.severity == Severity.warning &&
-          logger.message == loggedMessage);
-
-   // test large verbose level
-   logger.clear();
-   verboseLog = VerboseLogger.create(3, testConfig, &logWarning);
-   verboseLog(loggedMessage);
-   assert(!logger.called);
-
-   // test wrong module
-   logger.clear();
-   verboseLog = VerboseLogger.create(4, testConfig, &logWarning, "not_this");
-   verboseLog.format("%s", loggedMessage);
-   assert(!logger.called); 
-
-   // test verbose level
-   logger.clear();
-   verboseLog = VerboseLogger.create(3, testConfig, &logWarning, "not_this");
-   verboseLog.format("%s", loggedMessage);
-   assert(logger.called); 
-   assert(logger.severity == Severity.warning &&
-          logger.message == loggedMessage);
-
-   // test severity config too high
-   logger.clear();
-   verboseLog = VerboseLogger.create(2, testConfig, &logInfo);
-   assert(!verboseLog.willLog);
-   verboseLog.format("%s", loggedMessage);
-   assert(!logger.called); 
-}
-
-/++
-Conditionally records a verbose log message by checking that verbose messages
-are enable for the module from where it is called and by checking any user
-defined condition.
-
-Example:
----
-vlog(1)("Log a verbose ", 1, " message!");
-vlog(2).write("Log a verbose ", 2, " message!");
-vlog(3).format("Also logs a verbose %s message!", 3);
----
-Logs a message if the specified verbose level is enabled for the calling
-module.
-
-Example:
----
-void coolFunction(Object object)
-{
-   vlog(1).when(object is null)("Gave me a null object; we can handle it!");
-   // ...
-}
-
-foreach(i; 0 .. 10)
-{
-   vlog(2).when(first())("Only log this the first time in the loop");
-}
----
-Logs a message if the specified verbose level is enabled for the calling module
-and all the user defined condition are true.
-
-Note:
-See $(D DefaultLogger) for a description of all the methods defined by this
-structure.
-+/
-struct VerboseLogger
-{
-   private static VerboseLogger create(short level,
-                                       ref shared(ModuleConfig) config,
-                                       DefaultLogger* logger,
-                                       string file = __FILE__)
+   // test that both LogFilter and NoopLogFilter same public methods
+   void publicInterface(T)()
    {
-      if(logger.willLog && config.verboseConfig.matches(file, level))
-      {
-         VerboseLogger vlogger;
-         vlogger._message.severity = logger.severity;
-         vlogger._message.threadId = Thread.getThis.threadId;
-         vlogger._message.isVerbose = true;
-         vlogger._message.verbose = level;
+      T filter;
+      if(filter.willLog) {}
 
-         vlogger._logger = logger;
-
-         return vlogger;
-      }
-
-      return VerboseLogger._verboseNoop;
+      filter.write("hello ", 1, " world");
+      filter(1, " hello world");
+      filter.format("format string", true, 4, 5.0);
+      filter.when(true)("message");
    }
 
-   @property bool willLog() const
-   {
-      return _logger !is null && _message.isVerbose && _logger.willLog;
-   }
-
-   ref VerboseLogger when(lazy bool now)
-   {
-      if(willLog && now)
-      {
-         return this;
-      }
-
-      return _verboseNoop;
-   }
-
-   void write(string file = __FILE__, int line = __LINE__, T...)(lazy T args)
-   {
-      if(willLog)
-      {
-         /// XXX move this to format
-         _message.file = file;
-         _message.line = line;
-         _logger.log(_message, args);
-      }
-   }
-   alias write opCall;
-
-   void format(string file = __FILE__, int line = __LINE__, T...)
-              (lazy string fmt, lazy T args)
-   {
-      if(willLog)
-      {
-         _message.file = file;
-         _message.line = line;
-         _logger.logf(_message, fmt, args);
-      }
-   }
-
-   private Logger.LogMessage _message;
-   private DefaultLogger* _logger;
-
-   private static __gshared VerboseLogger _verboseNoop;
+   assert(__traits(compiles, publicInterface!LogFilter()));
+   assert(__traits(compiles, publicInterface!NoopLogFilter()));
 }
 
 // Used by the module to disable logging at compile time.
-struct NoopLogger
+struct NoopLogFilter
 {
    @property bool willLog() const { return false; }
 
-   ref NoopLogger when(lazy bool now) { return this; }
+   ref NoopLogFilter when(lazy bool now) { return this; }
    void write(T...)(lazy T args) {}
    alias write opCall;
    void format(T...)(lazy string fmt, lazy T args) {}
@@ -1180,7 +1101,6 @@ public struct LoggerConfig
    /// Name to use when generating log file names.
    @property string loggerName() { return _loggerName; }
 
-   // XXX implement this bevahior. the current code doesn't do this.
    /++
       Specifies if the logger should write to stderr. If this property is set,
       then it only logs to stderr and not to files.
@@ -1190,7 +1110,6 @@ public struct LoggerConfig
    @property void logToStderr(bool logToStderr) { _logToStderr = logToStderr; }
    @property bool logToStderr() { return _logToStderr; } /// ditto
 
-   // XXX implement this bevahior. the current code doesn't do this.
    /++
       Specifies if the logger should write to stderr. If this property is set,
       then it logs to stderr and to files.
@@ -1370,40 +1289,6 @@ The method must not return until all pending log operations complete.
 
       /// Time when the log message was created.
       long time;
-
-      bool isVerbose;
-      short verbose;
-
-      string logLine() const
-      {
-         auto writer = appender!string();
-
-         if(isVerbose) formattedWrite(writer,
-                                      verboseFormat,
-                                      file,
-                                      line,
-                                      verbose,
-                                      threadId,
-                                      time,
-                                      message,
-                                      newline);
-         else formattedWrite(writer,
-                             severityFormat,
-                             file,
-                             line,
-                             toupper(to!string(severity)),
-                             threadId,
-                             time,
-                             message,
-                             newline);
-
-
-         return writer.data;
-      }
-
-      // XXX move this to LoggerConfig
-      static string severityFormat = "%s:%s:%s:%x:%x %s%s";
-      static string verboseFormat = "%s:%s:VLOG(%s):%x:%x %s%s";
    }
 }
 
@@ -1432,27 +1317,44 @@ class SharedLogger : Logger
       _mutex = new Mutex;
 
       // Create file for every severity 
-      static if(is(typeof(fatal) == NoopLogger)) enum staticWriters = 0;
-      else static if(is(typeof(error) == NoopLogger)) enum staticWriters = 1;
-      else static if(is(typeof(warning) == NoopLogger)) enum staticWriters = 2;
-      else static if(is(typeof(info) == NoopLogger)) enum staticWriters = 3;
-      else enum staticWriters = 4;
+      enum logFilters = numberOfLogFilters();
 
       // Add one more for stderr
-      auto numberOfWriters = staticWriters == 0 ? 0 : staticWriters + 1;
+      auto numberOfWriters = logFilters == 0 ? 0 : logFilters + 1;
 
       _writers = new File[numberOfWriters];
 
       // create the indices for all the loggers
-      _indices = new size_t[][staticWriters];
+      _indices = new size_t[][logFilters];
       foreach(i, ref index; _indices)
       {
-         foreach(j; i .. staticWriters) index ~= j;
-         if(_loggerConfig.logToStderr && i <= _loggerConfig.stderrThreshold)
+         if(_loggerConfig.logToStderr)
          {
-            index ~= _writers.length - 1;
+            // Only log to stderr
+            if(i <= _loggerConfig.stderrThreshold) index ~= _writers.length - 1;
+         }
+         else
+         {
+            // Add the file writers
+            foreach(j; i .. logFilters) index ~= j;
+
+            // Add stderr if needed
+            if(_loggerConfig.alsoLogToStderr &&
+               i <= _loggerConfig.stderrThreshold)
+            {
+               index ~= _writers.length - 1;
+            }
          }
       }
+   }
+
+   private static int numberOfLogFilters() pure nothrow
+   {
+      static if(is(typeof(fatal) == NoopLogFilter)) return 0;
+      else static if(is(typeof(error) == NoopLogFilter)) return  1;
+      else static if(is(typeof(warning) == NoopLogFilter)) return 2;
+      else static if(is(typeof(info) == NoopLogFilter)) return 3;
+      else return 4;
    }
 
    private shared void init()
@@ -1497,7 +1399,13 @@ class SharedLogger : Logger
                _writers[i].open(_filenames[i], "w");
                _writers[i].setvbuf(_loggerConfig.bufferSize);
             }
-            _writers[i].write(message.logLine());
+            _writers[i].writefln("%s:%s:%s:%x:%x %s",
+                                 message.file,
+                                 message.line,
+                                 toupper(to!string(message.severity)),
+                                 message.threadId,
+                                 message.time,
+                                 message.message);
          }
       }
    }
@@ -1722,11 +1630,21 @@ unittest
 {
 }
 
-private shared struct ModuleConfig
+private final class ModuleConfig
 {
+   this()
+   {
+      _rwmutex = new ReadWriteMutex(ReadWriteMutex.Policy.PREFER_READERS);
+   }
+
    void init(FilterConfig filterConfig)
    {
       enforce(filterConfig._logger);
+
+      // there should really be no readers while the trying to init
+      enforce(_rwmutex.writer.tryLock);
+      scope(exit) _rwmutex.writer.unlock;
+
       // it is a error if the user tries to init after the logger has been used
       enforce(!_loggerUsed);
 
@@ -1743,64 +1661,79 @@ private shared struct ModuleConfig
 
    @property shared(Logger) logger()
    {
-      // Somebody asked for the logger don't allow changing it
-      _loggerUsed = true;
-      return _logger;
+      synchronized(_rwmutex.reader)
+      {
+         // Somebody asked for the logger don't allow changing it
+         _loggerUsed = true;
+         return _logger;
+      }
    }
 
-   @property Severity severity() const
+   @property Severity severity()
    {
-      return _severity;
+      synchronized(_rwmutex.reader())
+      {
+         return _severity;
+      }
    }
 
-   @property ref FilterConfig.VerboseConfig verboseConfig()
+   bool matchesVerboseConfig(string file, short level)
    {
-      return _verboseConfig;
+      synchronized(_rwmutex.reader)
+      {
+         return _verboseConfig.matches(file, level);
+      }
    }
 
    @property void function() fatalHandler()
    {
-      return _fatalHandler;
+      synchronized(_rwmutex.reader)
+      {
+         return _fatalHandler;
+      }
    }
 
    private bool _loggerUsed;
-   private Logger _logger;
+   private shared Logger _logger;
    private Severity _severity;
-   private __gshared FilterConfig.VerboseConfig _verboseConfig;
-   private __gshared void function() _fatalHandler;
+   private FilterConfig.VerboseConfig _verboseConfig;
+   private void function() _fatalHandler;
+   private ReadWriteMutex _rwmutex;
 }
 
 static this()
 {
-   if(is(typeof(fatal) == DefaultLogger))
+   if(is(typeof(fatal) == LogFilter))
    {
-      fatal.init(Severity.fatal, &_moduleConfig);
+      fatal.init(Severity.fatal, _moduleConfig);
    }
 
-   if(is(typeof(error) == DefaultLogger))
+   if(is(typeof(error) == LogFilter))
    {
-      error.init(Severity.error, &_moduleConfig);
+      error.init(Severity.error, _moduleConfig);
    }
 
-   if(is(typeof(warning) == DefaultLogger))
+   if(is(typeof(warning) == LogFilter))
    {
-      warning.init(Severity.warning, &_moduleConfig);
+      warning.init(Severity.warning, _moduleConfig);
    }
 
-   if(is(typeof(info) == DefaultLogger))
+   if(is(typeof(info) == LogFilter))
    {
-      info.init(Severity.info, &_moduleConfig);
+      info.init(Severity.info, _moduleConfig);
    }
 }
 
 shared static this()
 {
+   _moduleConfig = new ModuleConfig;
+
    // XXX should try and catch this...
    auto args = Runtime.args;
    initLogging(args);
 }
 
-private shared ModuleConfig _moduleConfig;
+private __gshared ModuleConfig _moduleConfig;
 
 version(unittest)
 {
