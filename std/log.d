@@ -9,7 +9,7 @@
 // TODO Allow the configuration of the log line
 
 /++
-Implements an application level _logging mechanism.
+Implements an application level logging mechanism.
 
 ---
 import std.log;
@@ -29,7 +29,7 @@ This module defines a set of functions useful for many common logging tasks.
 The module allows the logging of messages at different severity levels and at
 different verbose level. Log messages at different severity levels and verbose
 level can be disabled and enabled both at compile time and at run time. The
-module can also log depending on user defined boolean conditions. The module
+module can also _log depending on user defined boolean conditions. The module
 includes some commonly use conditions like $(D every) 'n' times and $(D first)
 'n' times.
 
@@ -82,7 +82,7 @@ BUGS:
 Not tested on Windows. Log messages do not contain the logging thread when 
 using vanilla druntime.
 +/
-module std.logging;
+module std.log;
 
 import core.atomic : cas;
 import core.thread : Thread;
@@ -515,7 +515,7 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
       FilterConfig filterConfig;
       filterConfig.minSeverity = Severity.warning;
       filterConfig.verboseConfig.maxVerboseLevel = 3;
-      filterConfig.verboseConfig.moduleFilter = "*logging.d=2";
+      filterConfig.verboseConfig.moduleFilter = "*log.d=2";
 
       auto logger = cast(shared) new SeverityFilter();
       filterConfig._logger = logger;
