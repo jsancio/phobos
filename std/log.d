@@ -1,7 +1,10 @@
 // Written in the D programming language.
-// XXX rename module
+// XXX add throwing of user define critical exception
+// XXX Allow changing configuration after init. Remove FilterConfig and
+//     VerboseConfig.
 // XXX write unittest for SharedLogger
 // XXX make sure that the examples are correct.
+// XXX rename dfatal and vlog to debugFatal and verbose.
 
 // TODO inspect all the try statements
 // TODO remove the use of text!
@@ -34,8 +37,8 @@ includes some commonly use conditions like $(D every) 'n' times and $(D first)
 'n' times.
 
 Four logging severity levels are defined - in other of severity they are:
-$(D info), $(D warning), $(D error), $(D fatal). Verbose messages are logged
-using $(D vlog).
+$(D info), $(D warning), $(D error), $(D critical) and $(D fatal). Verbose
+messages are logged using $(D vlog).
 
 If the module is not initialized it will configure itself using the command
 line arguments passed to the process and the process's enviroment variables.
@@ -63,7 +66,7 @@ void main(string[] args)
    foreach (i; 0 .. 10)
    {
       info.when(every(9))("Every nine");
- 
+
       if(info.willLog)
       {
          auto message = "Cool message";
@@ -74,12 +77,19 @@ void main(string[] args)
 
       vlog(2).when(first())("Verbose message only on the first iterations");
    }
+
+   try critical("Critical message");
+   catch(CriticalException e)
+   {
+      // shutdown application...
+   }
+
    fatal("This is a fatal message!!!");
 }
 ---
 
 BUGS:
-Not tested on Windows. Log messages do not contain the logging thread when 
+Not tested on Windows. Log messages do not contain the logging thread when
 using vanilla druntime.
 +/
 module std.log;
@@ -93,7 +103,7 @@ import core.time : Duration;
 import std.stdio : File, stderr, writefln;
 import std.string : newline, toupper;
 import std.conv : text, to;
-import std.datetime: Clock, DateTime;
+import std.datetime: Clock, DateTime, SysTime;
 import std.exception : enforce;
 import std.getopt : getopt;
 import std.process : getenv;
@@ -114,10 +124,8 @@ version(StdDdoc)
 {
    /++
       Fatal log messages terminate the application after the message is
-      persisted. Fatal log messages are disabled at compile time by setting the
-      version to 'strip_log_fatal'. Fatal log message cannot be disabled at run
-      time. Disabling _fatal log messages at compile time also disables
-      lower severity messages, e.g. error, warning and info.
+      persisted. Fatal log message cannot be disabled at compile time or at
+      run time.
 
       Example:
       ---
@@ -128,8 +136,8 @@ fatal("A fatal message!");
 
    /++
       Debug fatal log messages log at fatal severity in debug mode and log at
-      error severity in release mode. See fatal and error severity levels for a
-      description of their behavior.
+      critical severity in release mode. See fatal and critical severity
+      levels for a description of their behavior.
 
       Example:
       ---
@@ -139,11 +147,23 @@ dfatal("A fatal message in debug and an error message in release!");
    LogFilter dfatal;
 
    /++
+      Critical log messages throw an exception after the message is persisted.
+      Critical log messages cannot be disabled at compile time or at run time.
+
+      Example:
+      ---
+critical("A critical message!");
+      ---
+    +/
+   LogFilter critical;
+
+   /++
       Error log messages are disabled at compiled time by setting the version
       to 'strip_log_error'. Error log messages are disabled at run time by
-      setting the minimun severity to $(D Level.fatal) in $(D FilterConfig).
-      Disabling _error log messages at compile time or at run time also
-      disables lower severity messages, e.g. warning and info.
+      setting the minimun severity to $(D Level.fatal) or $(D Level.critical)
+      in $(D FilterConfig). Disabling _error log messages at compile time or
+      at run time also disables lower severity messages, e.g. warning and
+      info.
 
       Example:
       ---
@@ -196,8 +216,8 @@ vlog(1)("A verbose 1 message");
 }
 else
 {
-   version(strip_log_fatal) NoopLogFilter fatal;
-   else LogFilter fatal;
+   LogFilter fatal;
+   LogFilter critical;
 
    version(strip_log_error) NoopLogFilter error;
    else typeof(fatal) error;
@@ -209,7 +229,7 @@ else
    else typeof(warning) info;
 
    debug alias fatal dfatal;
-   else alias error dfatal;
+   else alias critical dfatal;
 
    ref typeof(info) vlog(short level, string file = __FILE__)
    {
@@ -229,6 +249,7 @@ unittest
    LogFilter logInfo;
    LogFilter logWarning;
    LogFilter logError;
+   LogFilter logCritical;
    LogFilter logFatal;
 
    auto testConfig = new ModuleConfig;
@@ -250,6 +271,7 @@ unittest
 
    logWarning.init(Severity.warning, testConfig);
    logError.init(Severity.error, testConfig);
+   logCritical.init(Severity.critical, testConfig);
    logFatal.init(Severity.fatal, testConfig);
 
    auto loggedMessage = "logged message";
@@ -258,6 +280,7 @@ unittest
    assert(!logInfo.willLog);
    assert(logWarning.willLog);
    assert(logError.willLog);
+   assert(logCritical.willLog);
    assert(logFatal.willLog);
 
    // Test logging and severity filtering
@@ -281,6 +304,14 @@ unittest
    assert(logger.called);
    assert(logger.severity == Severity.error &&
           logger.message == loggedMessage);
+
+   logger.clear();
+   try { logCritical(loggedMessage); assert(false); }
+   catch (CriticalException e) {}
+   assert(logger.called);
+   assert(logger.severity == Severity.critical &&
+          logger.message == loggedMessage);
+   assert(logger.flushCalled);
 
    logger.clear();
    try { logFatal(loggedMessage); assert(false); } catch (AssertError e) {}
@@ -339,6 +370,7 @@ struct LogFilter
       _config = config;
 
       _message.severity = severity;
+      // XXX remove this when druntime is fixed.
       static if(__traits(hasMember, Thread, "threadId"))
       {
          _message.threadId = Thread.getThis.threadId;
@@ -385,7 +417,7 @@ foreach(i; 0 .. 10)
 
       return _noopLogFilter;
    }
-   
+
    /++
       Concatenates all the arguements and logs them. Note: The parameters are
       only evaluated if a message can be logged.
@@ -447,7 +479,7 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
       message.message = _writer.data;
 
       // record the time stamp
-      message.time = Clock.currTime.stdTime;
+      message.time = Clock.currTime;
 
       scope(exit)
       {
@@ -458,8 +490,13 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
              + _fatalHandler to run before the assert.
              +/
             scope(exit) assert(false);
-            scope(exit) _config.fatalHandler(); 
+            scope(exit) _config.fatalHandler();
             _config.logger.flush();
+         }
+         else if(message.severity == Severity.critical)
+         {
+            _config.logger.flush();
+            throw new CriticalException(message.message.idup);
          }
       }
 
@@ -477,7 +514,7 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
       message.message = _writer.data;
 
       // record the time stamp
-      message.time = Clock.currTime.stdTime;
+      message.time = Clock.currTime;
 
       scope(exit)
       {
@@ -488,8 +525,13 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
              + _fatalHandler to run before the assert.
              +/
             scope(exit) assert(false);
-            scope(exit) _config.fatalHandler(); 
+            scope(exit) _config.fatalHandler();
             _config.logger.flush();
+         }
+         else if(message.severity == Severity.critical)
+         {
+            _config.logger.flush();
+            throw new CriticalException(message.message.idup);
          }
       }
 
@@ -547,13 +589,13 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
       logger.clear();
       verboseLog = LogFilter.vlog(4, testConfig, &logWarning, "not_this");
       verboseLog.format("%s", loggedMessage);
-      assert(!logger.called); 
+      assert(!logger.called);
 
       // test verbose level
       logger.clear();
       verboseLog = LogFilter.vlog(3, testConfig, &logWarning, "not_this");
       verboseLog.format("%s", loggedMessage);
-      assert(logger.called); 
+      assert(logger.called);
       assert(logger.severity == Severity.warning &&
             logger.message == loggedMessage);
 
@@ -562,7 +604,7 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
       verboseLog = LogFilter.vlog(2, testConfig, &logInfo);
       assert(!verboseLog.willLog);
       verboseLog.format("%s", loggedMessage);
-      assert(!logger.called); 
+      assert(!logger.called);
    }
 
    private static ref LogFilter vlog(short level,
@@ -584,6 +626,16 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
    private ModuleConfig _config;
 
    private static __gshared LogFilter _noopLogFilter;
+}
+
+final class CriticalException : Exception
+{
+   private this(string message,
+        string file = __FILE__,
+        int line = __LINE__)
+   {
+      super(message, null, file, line);
+   }
 }
 
 unittest
@@ -619,6 +671,7 @@ struct NoopLogFilter
 enum Severity
 {
    fatal = 0, ///
+   critical, /// ditto
    error, /// ditto
    warning, /// ditto
    info /// ditto
@@ -639,7 +692,7 @@ unittest
                 "--" ~ FilterConfig.VerboseConfig.maxVerboseLevelFlag,
                 "3",
                 "--ignoredOption"];
-               
+
    filterConfig = FilterConfig.create(args);
 
    // assert that all expected options where removed
@@ -816,7 +869,7 @@ struct FilterConfig
        +/
       static VerboseConfig create(ref string[] commandLine)
       {
-         VerboseConfig result; 
+         VerboseConfig result;
 
          void vmodule(string option, string value)
          {
@@ -876,7 +929,7 @@ struct FilterConfig
 
          For every '[pattern]=[level]' in the configuration string an entry is
          created.
-         
+
          Example:
          ---
 FilterConfig.VerboseConfig config;
@@ -1074,7 +1127,7 @@ public struct LoggerConfig
 
    /++
       Command line flag for setting the stderr logging threshold. The default
-      value is "stderrthreshold" which at the command line is 
+      value is "stderrthreshold" which at the command line is
       '--stderrthreshold'.
     +/
    static string stderrThresholdFlag = "stderrthreshold";
@@ -1091,7 +1144,7 @@ public struct LoggerConfig
    this(string name)
    {
       _loggerName = name;
-      
+
       // get default log dir
       _logDirectory = getenv("LOGDIR");
       if(_logDirectory is null) _logDirectory = getenv("TEST_TMPDIR");
@@ -1189,12 +1242,10 @@ void main(string[] args)
 }
 ---
 +/
-void initLogging(ref string[] commandLine)
+void initLogging(T : Logger = SharedLogger, LC = LoggerConfig)
+                (ref string[] commandLine)
 {
-   auto filterConfig = FilterConfig.create(commandLine);
-   auto loggerConfig = LoggerConfig.create(commandLine);
-
-   initializeLogging!SharedLogger(loggerConfig, filterConfig);
+   initLogging!T(LC.create(commandLine), FilterConfig.create(commandLine));
 }
 
 /++
@@ -1233,9 +1284,8 @@ void main(string[] args)
 ---
 This example disables writing log messages at run time.
 +/
-void initializeLogging(T : Logger, BC)
-                      (BC loggerConfig,
-                       FilterConfig filterConfig = FilterConfig())
+void initLogging(T : Logger, LC)
+                (LC loggerConfig, FilterConfig filterConfig = FilterConfig())
 {
    filterConfig._logger = cast(shared) new T(loggerConfig);
    _moduleConfig.init(filterConfig);
@@ -1291,7 +1341,7 @@ The method must not return until all pending log operations complete.
       char[] message;
 
       /// Time when the log message was created.
-      long time;
+      SysTime time;
    }
 }
 
@@ -1309,7 +1359,7 @@ class SharedLogger : Logger
 {
    /++
       Constructs a logger with the configuration specified in loggerConfig.
-      
+
       This constructor is required by $(D initializeLogging).
     +/
    private this(const ref LoggerConfig loggerConfig)
@@ -1319,7 +1369,7 @@ class SharedLogger : Logger
       _loggerConfig = loggerConfig;
       _mutex = new Mutex;
 
-      // Create file for every severity 
+      // Create file for every severity
       enum logFilters = numberOfLogFilters();
 
       // Add one more for stderr
@@ -1354,10 +1404,11 @@ class SharedLogger : Logger
    private static int numberOfLogFilters() pure nothrow
    {
       static if(is(typeof(fatal) == NoopLogFilter)) return 0;
-      else static if(is(typeof(error) == NoopLogFilter)) return  1;
-      else static if(is(typeof(warning) == NoopLogFilter)) return 2;
-      else static if(is(typeof(info) == NoopLogFilter)) return 3;
-      else return 4;
+      else static if(is(typeof(critical) == NoopLogFilter)) return  1;
+      else static if(is(typeof(error) == NoopLogFilter)) return  2;
+      else static if(is(typeof(warning) == NoopLogFilter)) return 3;
+      else static if(is(typeof(info) == NoopLogFilter)) return 4;
+      else return 5;
    }
 
    private shared void init()
@@ -1395,19 +1446,19 @@ class SharedLogger : Logger
       synchronized(_mutex)
       {
          init();
-         foreach(i; _indices[message.severity]) 
+         foreach(i; _indices[message.severity])
          {
             if(!_writers[i].isOpen)
             {
                _writers[i].open(_filenames[i], "w");
                _writers[i].setvbuf(_loggerConfig.bufferSize);
             }
-            _writers[i].writefln("%s:%s:%s:%x:%x %s",
+            _writers[i].writefln("%s:%s:%s:%x:%s %s",
                                  message.file,
                                  message.line,
                                  toupper(to!string(message.severity)),
                                  message.threadId,
-                                 message.time,
+                                 message.time.toISOString(),
                                  message.message);
          }
       }
@@ -1656,6 +1707,10 @@ private final class ModuleConfig
       _logger = filterConfig._logger;
 
       _severity = filterConfig._minSeverity;
+      // cannot disable critical severity
+      _severity = _severity < Severity.critical ?
+                              Severity.critical :
+                              _severity;
 
       _fatalHandler =  filterConfig._fatalHandler ?
                        filterConfig._fatalHandler :
