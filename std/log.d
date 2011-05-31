@@ -1,5 +1,4 @@
 // Written in the D programming language.
-// XXX add throwing of user define critical exception
 // XXX Allow changing configuration after init. Remove FilterConfig and
 //     VerboseConfig.
 // XXX write unittest for SharedLogger
@@ -239,7 +238,7 @@ else
       }
       else
       {
-         return LogFilter.vlog(level, _moduleConfig, &info, file);
+         return LogFilter.vlog(level, _moduleConfig, info, file);
       }
    }
 }
@@ -550,7 +549,7 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
       logWarning.init(Severity.warning, testConfig);
 
       // verbose logging shouldn't throw if module not init
-      auto verboseLog = LogFilter.vlog(0, testConfig, &logWarning);
+      auto verboseLog = LogFilter.vlog(0, testConfig, logWarning);
       assert(!verboseLog.willLog);
 
       FilterConfig filterConfig;
@@ -565,7 +564,7 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
 
       // Test vlogging and module filtering
       logger.clear();
-      verboseLog = LogFilter.vlog(2, testConfig, &logWarning);
+      verboseLog = LogFilter.vlog(2, testConfig, logWarning);
       assert(verboseLog.willLog);
       verboseLog(loggedMessage);
       assert(logger.called);
@@ -581,19 +580,19 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
 
       // test large verbose level
       logger.clear();
-      verboseLog = LogFilter.vlog(3, testConfig, &logWarning);
+      verboseLog = LogFilter.vlog(3, testConfig, logWarning);
       verboseLog(loggedMessage);
       assert(!logger.called);
 
       // test wrong module
       logger.clear();
-      verboseLog = LogFilter.vlog(4, testConfig, &logWarning, "not_this");
+      verboseLog = LogFilter.vlog(4, testConfig, logWarning, "not_this");
       verboseLog.format("%s", loggedMessage);
       assert(!logger.called);
 
       // test verbose level
       logger.clear();
-      verboseLog = LogFilter.vlog(3, testConfig, &logWarning, "not_this");
+      verboseLog = LogFilter.vlog(3, testConfig, logWarning, "not_this");
       verboseLog.format("%s", loggedMessage);
       assert(logger.called);
       assert(logger.severity == Severity.warning &&
@@ -601,7 +600,7 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
 
       // test severity config too high
       logger.clear();
-      verboseLog = LogFilter.vlog(2, testConfig, &logInfo);
+      verboseLog = LogFilter.vlog(2, testConfig, logInfo);
       assert(!verboseLog.willLog);
       verboseLog.format("%s", loggedMessage);
       assert(!logger.called);
@@ -609,12 +608,12 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
 
    private static ref LogFilter vlog(short level,
                                      ModuleConfig config,
-                                     LogFilter* logger,
+                                     ref LogFilter logger,
                                      string file = __FILE__)
    {
       if(logger.willLog && config.matchesVerboseConfig(file, level))
       {
-         return *logger;
+         return logger;
       }
 
       return _noopLogFilter;
@@ -1761,10 +1760,8 @@ private final class ModuleConfig
 
 static this()
 {
-   if(is(typeof(fatal) == LogFilter))
-   {
-      fatal.init(Severity.fatal, _moduleConfig);
-   }
+   fatal.init(Severity.fatal, _moduleConfig);
+   critical.init(Severity.critical, _moduleConfig);
 
    if(is(typeof(error) == LogFilter))
    {
