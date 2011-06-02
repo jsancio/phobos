@@ -28478,15 +28478,6 @@ private:
     {
         super("UTC", "UTC", "UTC");
     }
-
-
-    static immutable UTC _utc;
-
-
-    static this()
-    {
-        _utc = new immutable(UTC)();
-    }
 }
 
 
@@ -34030,3 +34021,9 @@ template _isPrintable(T...)
     }
 }
 
+shared static this()
+{
+   _utc = new immutable(UTC)();
+}
+
+private shared static immutable UTC _utc;

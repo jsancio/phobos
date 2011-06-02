@@ -1,10 +1,13 @@
 // Written in the D programming language.
-// XXX Remove LoggerConfig
-// XXX write unittest for SharedLogger
+// XXX write unittest for FileLogger
+// XXX add support for rich booleans in when()
+// XXX rename LogFilter
+// XXX test changing Flag in initialize for FileLogger.Configuration
+// XXX test failure in initialize for FileLogger.Configuration
+// XXX check all template parameters
 // XXX make sure that the examples are correct.
 // XXX rename dfatal and vlog to debugFatal and verbose.
 
-// TODO inspect all the try statements
 // TODO remove the use of text!
 // TODO Allow the configuration of the log file name
 // TODO Allow the configuration of the log line
@@ -41,7 +44,7 @@ messages are logged using $(D vlog).
 If the module is not initialized it will configure itself using the command
 line arguments passed to the process and the process's enviroment variables.
 For a list of command line option and enviroment variable, and their meaning
-see $(D Configuration) and $(D LoggerConfig).
+see $(D Configuration) and $(D FileLogger.Configuration).
 
 Example:
 ---
@@ -89,33 +92,39 @@ void main(string[] args)
 BUGS:
 Not tested on Windows. Log messages do not contain the logging thread when
 using vanilla druntime.
+
+Copyright: Jose Armando Garcia Sancio 2011-.
+
+License: $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0).
+
+Authors: Jose Armando Garcia Sancio
+
+Source: $(PHOBOSSRC std/_log.d)
 +/
 module std.log;
 
-import core.atomic : cas;
 import core.thread : Thread;
 import core.sync.mutex : Mutex;
 import core.sync.rwmutex : ReadWriteMutex;
 import core.runtime : Runtime;
 import core.time : Duration;
-import std.stdio : File, stderr, writefln;
-import std.string : newline, toupper;
+import std.stdio : File, stderr;
+import std.string : toupper;
 import std.conv : text, to;
-import std.datetime: Clock, DateTime, SysTime;
+import std.datetime: Clock, SysTime, UTC, FracSec;
 import std.exception : enforce;
 import std.getopt : getopt;
 import std.process : getenv;
-import std.array : Appender, appender, array;
+import std.array : Appender, array;
 import std.format : formattedWrite;
 import std.path : fnmatch, join;
-import std.algorithm : endsWith, startsWith, splitter, swap;
+import std.algorithm : endsWith, splitter;
 
 version(unittest)
 {
-   import std.array : replicate;
-   import std.file : remove;
    import core.exception : AssertError;
    import core.time : dur;
+   import std.exception : assertThrown;
 }
 
 version(StdDdoc)
@@ -130,7 +139,7 @@ version(StdDdoc)
 fatal("A fatal message!");
       ---
     +/
-   LogFilter fatal;
+   LogFilter!(Severity.fatal) fatal;
 
    /++
       Debug fatal log messages log at fatal severity in debug mode and log at
@@ -142,7 +151,7 @@ fatal("A fatal message!");
 dfatal("A fatal message in debug and an error message in release!");
       ---
     +/
-   LogFilter dfatal;
+   LogFilter!(Severity.fatal) dfatal;
 
    /++
       Critical log messages throw an exception after the message is persisted.
@@ -153,7 +162,7 @@ dfatal("A fatal message in debug and an error message in release!");
 critical("A critical message!");
       ---
     +/
-   LogFilter critical;
+   LogFilter!(Severity.critical) critical;
 
    /++
       Error log messages are disabled at compiled time by setting the version
@@ -168,7 +177,7 @@ critical("A critical message!");
 error("An error message!");
       ---
     +/
-   LogFilter error;
+   LogFilter!(Severity.error) error;
 
    /++
       Warning log messages are disabled at compiled time by setting the version
@@ -182,7 +191,7 @@ error("An error message!");
 warning("A warning message!");
       ---
     +/
-   LogFilter warning;
+   LogFilter!(Severity.warning) warning;
 
    /++
       Info log messages are disabled at compiled time by setting the version to
@@ -196,7 +205,7 @@ warning("A warning message!");
 info("An info message!");
       ---
     +/
-   LogFilter info;
+   LogFilter!(Severity.info) info;
 
    /++
       Verbose log messages are log at the info severity _level. To disable them
@@ -210,21 +219,27 @@ info("An info message!");
 vlog(1)("A verbose 1 message");
       ---
     +/
-   LogFilter vlog(short level, string file = __FILE__);
+   LogFilter!(Severity.info) vlog(short level, string file = __FILE__);
 }
 else
 {
-   LogFilter fatal;
-   LogFilter critical;
+   LogFilter!(Severity.fatal) fatal;
+   LogFilter!(Severity.critical) critical;
 
-   version(strip_log_error) NoopLogFilter error;
-   else typeof(fatal) error;
+   version(strip_log_error) NoopLogFilter error, warning, info;
+   else
+   {
+      LogFilter!(Severity.error) error;
 
-   version(strip_log_warning) NoopLogFilter warning;
-   else typeof(error) warning;
+      version(strip_log_warning) NoopLogFilter warning, info;
+      else
+      {
+         LogFilter!(Severity.warning) warning;
 
-   version(strip_log_info) NoopLogFilter info;
-   else typeof(warning) info;
+         version(strip_log_info) NoopLogFilter info;
+         else LogFilter!(Severity.info) info;
+      }
+   }
 
    debug alias fatal dfatal;
    else alias critical dfatal;
@@ -237,31 +252,31 @@ else
       }
       else
       {
-         return LogFilter.vlog(level, config, info, file);
+         return info.vlog(level, file);
       }
    }
 }
 
 unittest
 {
-   LogFilter logInfo;
-   LogFilter logWarning;
-   LogFilter logError;
-   LogFilter logCritical;
-   LogFilter logFatal;
+   LogFilter!(Severity.info) logInfo;
+   LogFilter!(Severity.warning) logWarning;
+   LogFilter!(Severity.error) logError;
+   LogFilter!(Severity.critical) logCritical;
+   LogFilter!(Severity.fatal) logFatal;
 
-   auto logger = cast(shared) new TestLogger();
+   auto logger = new shared(TestLogger);
    auto testConfig = new Configuration(logger);
    testConfig.minSeverity = Severity.warning;
 
    // logger shouldn't log if not init
    assert(!logInfo.willLog);
 
-   logInfo.initialize(Severity.info, testConfig);
-   logWarning.initialize(Severity.warning, testConfig);
-   logError.initialize(Severity.error, testConfig);
-   logCritical.initialize(Severity.critical, testConfig);
-   logFatal.initialize(Severity.fatal, testConfig);
+   logInfo.initialize(testConfig);
+   logWarning.initialize(testConfig);
+   logError.initialize(testConfig);
+   logCritical.initialize(testConfig);
+   logFatal.initialize(testConfig);
 
    auto loggedMessage = "logged message";
 
@@ -295,15 +310,14 @@ unittest
           logger.message == loggedMessage);
 
    logger.clear();
-   try { logCritical(loggedMessage); assert(false); }
-   catch (CriticalException e) {}
+   assertThrown!CriticalException(logCritical(loggedMessage));
    assert(logger.called);
    assert(logger.severity == Severity.critical &&
           logger.message == loggedMessage);
    assert(logger.flushCalled);
 
    logger.clear();
-   try { logFatal(loggedMessage); assert(false); } catch (AssertError e) {}
+   assertThrown!AssertError(logFatal(loggedMessage));
    assert(logger.called);
    assert(logger.severity == Severity.fatal &&
           logger.message == loggedMessage);
@@ -352,9 +366,9 @@ foreach(i; 0 .. 10)
 Logs a message if the specified severity level is enabled and all the user
 defined condition are true.
 +/
-struct LogFilter
+struct LogFilter(Severity severity)
 {
-   private void initialize(Severity severity, Configuration configuration)
+   private void initialize(Configuration configuration)
    {
       _config = configuration;
 
@@ -383,7 +397,7 @@ if(error.willLog)
    @property bool willLog()
    {
       return _config !is null &&
-             _message.severity <= _config.minSeverity;
+             severity <= _config.minSeverity;
    }
 
    /++
@@ -400,7 +414,7 @@ foreach(i; 0 .. 10)
 }
       ---
     +/
-   ref LogFilter when(lazy bool now)
+   ref LogFilter!severity when(lazy bool now)
    {
       if(willLog && now) return this;
 
@@ -468,21 +482,24 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
       message.message = _writer.data;
 
       // record the time stamp
-      message.time = Clock.currTime;
+      message.time = Clock.currTime(UTC());
 
-      scope(exit)
+      static if(severity == Severity.fatal)
       {
-         if(message.severity == Severity.fatal)
+         /+
+          + The other of the scope(exit) is important. We want
+          + _fatalHandler to run before the assert.
+          +/
+         scope(exit)
          {
-            /+
-             + The other of the scope(exit) is important. We want
-             + _fatalHandler to run before the assert.
-             +/
             scope(exit) assert(false);
             scope(exit) _config.fatalHandler();
             _config.logger.flush();
          }
-         else if(message.severity == Severity.critical)
+      }
+      else static if(severity == Severity.critical)
+      {
+         scope(exit)
          {
             _config.logger.flush();
             throw new CriticalException(message.message.idup);
@@ -503,7 +520,7 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
       message.message = _writer.data;
 
       // record the time stamp
-      message.time = Clock.currTime;
+      message.time = Clock.currTime(UTC());
 
       scope(exit)
       {
@@ -531,21 +548,21 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
    {
       auto loggedMessage = "Verbose log message";
 
-      LogFilter logInfo;
-      LogFilter logWarning;
+      LogFilter!(Severity.info) logInfo;
+      LogFilter!(Severity.warning) logWarning;
 
-      auto logger = cast(shared) new TestLogger();
+      auto logger = new shared(TestLogger);
       auto testConfig = new Configuration(logger);
       testConfig.minSeverity = Severity.warning;
       testConfig.maxVerboseLevel = 3;
       testConfig.verboseFilter = "*log.d=2";
 
-      logInfo.initialize(Severity.info, testConfig);
-      logWarning.initialize(Severity.warning, testConfig);
+      logInfo.initialize(testConfig);
+      logWarning.initialize(testConfig);
 
       // Test vlogging and module filtering
       logger.clear();
-      auto verboseLog = LogFilter.vlog(2, testConfig, logWarning);
+      auto verboseLog = logWarning.vlog(2);
       assert(verboseLog.willLog);
       verboseLog(loggedMessage);
       assert(logger.called);
@@ -561,19 +578,19 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
 
       // test large verbose level
       logger.clear();
-      verboseLog = LogFilter.vlog(3, testConfig, logWarning);
+      verboseLog = logWarning.vlog(3);
       verboseLog(loggedMessage);
       assert(!logger.called);
 
       // test wrong module
       logger.clear();
-      verboseLog = LogFilter.vlog(4, testConfig, logWarning, "not_this");
+      verboseLog = logWarning.vlog(4, "not_this");
       verboseLog.format("%s", loggedMessage);
       assert(!logger.called);
 
       // test verbose level
       logger.clear();
-      verboseLog = LogFilter.vlog(3, testConfig, logWarning, "not_this");
+      verboseLog = logWarning.vlog(3, "not_this");
       verboseLog.format("%s", loggedMessage);
       assert(logger.called);
       assert(logger.severity == Severity.warning &&
@@ -581,29 +598,26 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
 
       // test severity config too high
       logger.clear();
-      verboseLog = LogFilter.vlog(2, testConfig, logInfo);
-      assert(!verboseLog.willLog);
-      verboseLog.format("%s", loggedMessage);
+      auto infoVerboseLog = logInfo.vlog(2);
+      assert(!infoVerboseLog.willLog);
+      infoVerboseLog.format("%s", loggedMessage);
       assert(!logger.called);
    }
 
-   private static ref LogFilter vlog(short level,
-                                     Configuration configuration,
-                                     ref LogFilter logger,
-                                     string file = __FILE__)
+   private ref typeof(this) vlog(short level, string file = __FILE__)
    {
-      if(logger.willLog && configuration.matchesVerboseFilter(file, level))
+      if(willLog && _config.matchesVerboseFilter(file, level))
       {
-         return logger;
+         return this;
       }
 
       return _noopLogFilter;
    }
 
    private Logger.LogMessage _message;
-   private Appender!(char[]) _writer;
-
    private Configuration _config;
+
+   private static Appender!(char[]) _writer;
 
    private static __gshared LogFilter _noopLogFilter;
 }
@@ -632,8 +646,12 @@ unittest
       filter.when(true)("message");
    }
 
-   assert(__traits(compiles, publicInterface!LogFilter()));
-   assert(__traits(compiles, publicInterface!NoopLogFilter()));
+   assert(__traits(compiles, publicInterface!(LogFilter!(Severity.fatal))));
+   assert(__traits(compiles, publicInterface!(LogFilter!(Severity.critical))));
+   assert(__traits(compiles, publicInterface!(LogFilter!(Severity.error))));
+   assert(__traits(compiles, publicInterface!(LogFilter!(Severity.warning))));
+   assert(__traits(compiles, publicInterface!(LogFilter!(Severity.info))));
+   assert(__traits(compiles, publicInterface!NoopLogFilter));
 }
 
 // Used by the module to disable logging at compile time.
@@ -660,7 +678,7 @@ enum Severity
 unittest
 {
    // assert default values
-   auto testConfig = new Configuration(cast(shared) new TestLogger());
+   auto testConfig = new Configuration(new shared(TestLogger));
    assert(testConfig.minSeverity == Severity.error);
 
    auto name = "program_name";
@@ -687,6 +705,70 @@ unittest
    // assert vmodule entries
    assert(testConfig.matchesVerboseFilter("std/logging.d", 2));
    assert(testConfig.matchesVerboseFilter("module.d", 0));
+
+   // === test changing the flag ===
+   // remember the defaults
+   auto defaultSeverityFlag = Configuration.minSeverityFlag;
+   auto defaultFilterFlag = Configuration.verboseFilterFlag;
+   auto defaultLevelFlag = Configuration.maxVerboseLevelFlag;
+
+   // change the default
+   Configuration.minSeverityFlag = "severity";
+   Configuration.verboseFilterFlag = "filter";
+   Configuration.maxVerboseLevelFlag = "level";
+
+   args = [name,
+           "--" ~ Configuration.minSeverityFlag,
+           "warning",
+           "--" ~ Configuration.verboseFilterFlag,
+           "*log=2,unittest.d=0",
+           "--" ~ Configuration.maxVerboseLevelFlag,
+           "4",
+           "--" ~ defaultSeverityFlag,
+           "--" ~ defaultFilterFlag,
+           "--" ~ defaultLevelFlag];
+
+   testConfig.initialize(args);
+
+   // assert that all expected options where removed
+   assert(args.length == 4);
+   assert(args[0] == name);
+
+   assert(testConfig.minSeverity == Severity.warning);
+
+   // assert max verbose level
+   assert(testConfig.matchesVerboseFilter("file", 4));
+
+   // assert vmodule entries
+   assert(testConfig.matchesVerboseFilter("std/log.d", 2));
+   assert(testConfig.matchesVerboseFilter("unittest.d", 0));
+
+   // reset the defaults
+   Configuration.minSeverityFlag = defaultSeverityFlag;
+   Configuration.verboseFilterFlag = defaultFilterFlag;
+   Configuration.maxVerboseLevelFlag = defaultLevelFlag;
+
+   // === test that an error in initialize doesn't invalidate object
+   args = [name,
+           "--" ~ Configuration.minSeverityFlag,
+           "info",
+           "--" ~ Configuration.verboseFilterFlag,
+           "*logging=2,module=abc",
+           "--" ~ Configuration.maxVerboseLevelFlag,
+           "3",
+           "--ignoredOption"];
+
+   // set known values
+   testConfig.minSeverity = Severity.error;
+   testConfig.verboseFilter = "log=2";
+   testConfig.maxVerboseLevel = 1;
+
+   assertThrown(testConfig.initialize(args));
+
+   // test that nothing changed
+   assert(testConfig.minSeverity == Severity.error);
+   assert(testConfig.verboseFilter == "log=2");
+   assert(testConfig.maxVerboseLevel = 1);
 }
 
 /++
@@ -722,45 +804,43 @@ final class Configuration
     +/
    void initialize(ref string[] commandLine)
    {
-      void handleOption(string option, string value)
-      {
-         if(option == minSeverityFlag) minSeverity = to!Severity(value);
-         else if(option == verboseFilterFlag) verboseFilter = value;
-         else if(option == maxVerboseLevelFlag)
-         {
-            maxVerboseLevel = to!short(value);
-         }
-         else enforce(false);
-      }
+      auto severity = minSeverity;
+      auto level = maxVerboseLevel;
+      auto filter = verboseFilter;
 
       getopt(commandLine,
              std.getopt.config.passThrough,
-             minSeverityFlag, &handleOption,
-             verboseFilterFlag, &handleOption,
-             maxVerboseLevelFlag, &handleOption);
+             minSeverityFlag, &severity,
+             verboseFilterFlag, &filter,
+             maxVerboseLevelFlag, &level);
+
+      // try verbose filter first
+      verboseFilter = filter;
+      minSeverity = severity;
+      maxVerboseLevel = level;
    }
 
    /++
       Command line flag for setting the minimum severity level. The default
       value is "minloglevel" which at the command line is '--minloglevel'.
     +/
-   static string minSeverityFlag = "minloglevel";
+   static shared string minSeverityFlag = "minloglevel";
 
    /++
       Command line flag for setting the verbose configuration per module.  The
       default value is "vmodule" which at the command line is '--vmodule'.
     +/
-   static string verboseFilterFlag = "vmodule";
+   static shared string verboseFilterFlag = "vmodule";
 
    /++
       Command line flag for setting the maximum verbose level. The default
       value is "v" which at the command line is '--v'.
     +/
-   static string maxVerboseLevelFlag = "v";
+   static shared string maxVerboseLevelFlag = "v";
 
    unittest
    {
-      auto testConfig = new Configuration(cast(shared) new TestLogger());
+      auto testConfig = new Configuration(new shared(TestLogger));
 
       assert((testConfig.minSeverity = Severity.fatal) == Severity.critical);
       assert((testConfig.minSeverity = Severity.critical) == Severity.critical);
@@ -794,7 +874,7 @@ final class Configuration
 
    unittest
    {
-      auto testConfig = new Configuration(cast(shared) new TestLogger());
+      auto testConfig = new Configuration(new shared(TestLogger));
 
       // Test max verbose level
       testConfig.maxVerboseLevel = 1;
@@ -832,7 +912,7 @@ final class Configuration
    unittest
    {
       auto vmodule = "module=1,*another=3,even*=2,cat?=4,*dog?=1,evenmore=10";
-      auto testConfig = new Configuration(cast(shared) new TestLogger());
+      auto testConfig = new Configuration(new shared(TestLogger));
       testConfig.verboseFilter = vmodule;
 
       // Test exact patterns
@@ -862,14 +942,9 @@ final class Configuration
       assert(testConfig.matchesVerboseFilter("evenmore.d", 10));
 
       // Test invalid strings
-      try { testConfig.verboseFilter = "module=2,"; assert(false); }
-      catch (Exception e) {}
-
-      try { testConfig.verboseFilter = "module=a"; assert(false); }
-      catch (Exception e) {}
-
-      try { testConfig.verboseFilter = "module=2,another="; assert(false); }
-      catch (Exception e) {}
+      assertThrown(testConfig.verboseFilter = "module=2,");
+      assertThrown(testConfig.verboseFilter = "module=a");
+      assertThrown(testConfig.verboseFilter = "module=2,another=");
 
       // assert output
       assert(vmodule == testConfig.verboseFilter);
@@ -988,7 +1063,7 @@ vlog(2)("Verbose message is not logged");
       logger to a different $(D Logger). It will throw an exception if it is
       changed after a logging call has been made.
 
-      The default value is $(D SharedLogger).
+      The default value is $(D FileLogger).
 
       Example:
       ---
@@ -996,14 +1071,13 @@ import std.log;
 
 class NullLogger : Logger
 {
-   this(LoggerConfig config) {}
    shared void log(const ref LogMessage message) {}
    shared void flush() {}
 }
 
 void main(string[] args)
 {
-   configuration.logger = new NullLogger(LoggerConfig.create(args));
+   configuration.logger = new NullLogger();
    // ...
 }
       ---
@@ -1058,11 +1132,12 @@ void main(string[] args)
          {
             foreach(pattern; _modulePatterns[i])
             {
-               if(fnmatch(file, pattern))
+               if(pattern !is null && fnmatch(file, pattern))
                {
                   if(level <= _moduleLevels[i]) return true;
 
                   matchedFile = true;
+                  break;
                }
             }
          }
@@ -1087,188 +1162,335 @@ void main(string[] args)
    private ReadWriteMutex _rwmutex;
 }
 
-unittest
-{
-   auto name = "program_name";
-   // assert default values
-   auto loggerConfig = LoggerConfig(name);
-   assert(loggerConfig.loggerName == name);
-   assert(loggerConfig.logToStderr == false);
-   assert(loggerConfig.alsoLogToStderr == false);
-   assert(loggerConfig.stderrThreshold == Severity.error);
-   // can't test logDirectory as it is env dependent
-
-   auto args = [name,
-                "--" ~ LoggerConfig.logToStderrFlag,
-                "--" ~ LoggerConfig.stderrThresholdFlag, "fatal",
-                "--" ~ LoggerConfig.logDirectoryFlag, "/tmp",
-                "--ignoredOption"];
-
-   loggerConfig = LoggerConfig.create(args);
-   assert(args.length == 2);
-   assert(args[0] == name);
-
-   assert(loggerConfig.loggerName == name);
-   assert(loggerConfig.logToStderr);
-   assert(!loggerConfig.alsoLogToStderr);
-   assert(loggerConfig.stderrThreshold == Severity.fatal);
-   assert(loggerConfig.logDirectory == "/tmp");
-
-   // test alsoLogToStderr
-   args = [name, "--" ~ LoggerConfig.alsoLogToStderrFlag];
-
-   loggerConfig = LoggerConfig.create(args);
-   assert(loggerConfig.alsoLogToStderr);
-}
-
 /++
-Structure for configuring the default backend logger.
+Default $(D Logger) implementation.
+
+This logger implements all the configuration option described in
+$(D FileLogger.Configuration). This logger writes log messages to multiple
+files. There is a file for every severity level. Log messages of a given
+severity are written to all the log files of an equal or lower severity. E.g.
+A log message of severity warning will be written to the log files for warning
+and info but not to the log files of fatal and error.
 +/
-public struct LoggerConfig
+class FileLogger : Logger
 {
+   unittest
+   {
+      auto name = "program_name";
+      // assert default values
+      auto loggerConfig = Configuration.create();
+      loggerConfig.name = name;
+      assert(loggerConfig.name == name);
+      assert(loggerConfig.logToStderr == false);
+      assert(loggerConfig.alsoLogToStderr == false);
+      assert(loggerConfig.stderrThreshold == Severity.error);
+      // can't test logDirectory as it is env dependent
+
+      auto args = [name,
+                   "--" ~ Configuration.logToStderrFlag,
+                   "--" ~ Configuration.stderrThresholdFlag, "fatal",
+                   "--" ~ Configuration.logDirectoryFlag, "/tmp",
+                   "--ignoredOption"];
+
+      loggerConfig.initialize(args);
+      assert(args.length == 2);
+      assert(args[0] == name);
+
+      assert(loggerConfig.name == name);
+      assert(loggerConfig.logToStderr);
+      assert(!loggerConfig.alsoLogToStderr);
+      assert(loggerConfig.stderrThreshold == Severity.fatal);
+      assert(loggerConfig.logDirectory == "/tmp");
+
+      // test alsoLogToStderr
+      args = [name, "--" ~ Configuration.alsoLogToStderrFlag];
+
+      loggerConfig = Configuration.create();
+      loggerConfig.initialize(args);
+      assert(loggerConfig.alsoLogToStderr);
+   }
+
    /++
-      Create a configuration object based on the passed parameter.
+      Structure for configuring the default backend logger.
+    +/
+   public struct Configuration
+   {
+      /++
+         Create a configuration object based on the passed parameter.
 
-      The function processes every entry in commandLine looking for valid
-      command line options. All of the valid options are enumerated in the
-      static fields of this structure that end in 'Flag', e.g. logToStderrFlag.
-      When a valid command line option is found its value is stored in the
-      mapping object's property. For any property not set explictly its default
-      value is used. Here is a list of all the flags and how they map to
-      the object's property:
+         The function processes every entry in commandLine looking for valid
+         command line options. All of the valid options are enumerated in the
+         static fields of this structure that end in 'Flag', e.g.
+         logToStderrFlag. When a valid command line option is found its value
+         is stored in the mapping object's property. For any property not set
+         explictly its default value is used. Here is a list of all the flags
+         and how they map to the object's property:
 
-      $(UL
+         $(UL
             $(LI $(D logToStderrFlag) maps to $(D logToStderr))
             $(LI $(D alsoLogToStderrFlag) maps to $(D alsoLogToStderr))
             $(LI $(D stderrThresholdFlag) maps to $(D stderrThreshold))
             $(LI $(D logDirectoryFlag) maps to $(D logDirectory)))
 
-      Any valid field is removed from commandLine; any invalid field is left in
-      commandLine.
+         Any valid field is removed from commandLine; any invalid field is
+         left in commandLine.
 
-      The loggerName property is set to the program name, i.e. the first
-      element of commandLine.
-    +/
-   static LoggerConfig create(ref string[] commandLine)
-   {
-      enforce(commandLine.length > 0);
+         The $(D name) property is set to the program name, i.e. the first
+         element of commandLine.
+       +/
+      void initialize(ref string[] commandLine)
+      {
+         enforce(commandLine.length > 0);
 
-      auto loggerConfig = LoggerConfig(commandLine[0]);
+         bool logToStderr = _logToStderr;
+         bool alsoLogToStderr = _alsoLogToStderr;
+         Severity stderrThreshold = _stderrThreshold;
+         string logDirectory = _logDirectory;
 
-      getopt(commandLine,
-             std.getopt.config.passThrough,
-             logToStderrFlag, &loggerConfig._logToStderr,
-             alsoLogToStderrFlag, &loggerConfig._alsoLogToStderr,
-             stderrThresholdFlag, &loggerConfig._stderrThreshold,
-             logDirectoryFlag, &loggerConfig._logDirectory);
+         getopt(commandLine,
+                std.getopt.config.passThrough,
+                logToStderrFlag, &logToStderr,
+                alsoLogToStderrFlag, &alsoLogToStderr,
+                stderrThresholdFlag, &stderrThreshold,
+                logDirectoryFlag, &logDirectory);
 
-      return loggerConfig;
+         _name = commandLine[0];
+         _logToStderr = logToStderr;
+         _alsoLogToStderr = alsoLogToStderr;
+         _stderrThreshold = stderrThreshold;
+         _logDirectory = logDirectory;
+      }
+
+      /++
+         Command line flag for logging to stderr. The default value is
+         "logtostderr" which at the command line is '--logtostderr'.
+       +/
+      static string logToStderrFlag = "logtostderr";
+
+      /++
+         Command line flag for logging to stderr and files. The default value
+         is "alsologtostderr" which at the command line is '--alsologtostderr'.
+       +/
+      static string alsoLogToStderrFlag = "alsologtostderr";
+
+      /++
+         Command line flag for setting the stderr logging threshold. The
+         default value is "stderrthreshold" which at the command line is
+         '--stderrthreshold'.
+       +/
+      static string stderrThresholdFlag = "stderrthreshold";
+
+      /++
+         Command line flag for setting the logging directory. The default
+         value is "logdir" which at the command line is '--logdir'.
+       +/
+      static string logDirectoryFlag = "logdir";
+
+      /// Create file logger configuration.
+      static Configuration create()
+      {
+         Configuration loggerConfig;
+
+         loggerConfig._name = Runtime.args[0];
+
+         // get default log dir
+         loggerConfig._logDirectory = getenv("LOGDIR");
+         if(loggerConfig._logDirectory is null)
+         {
+            loggerConfig._logDirectory = getenv("TEST_TMPDIR");
+         }
+
+         return loggerConfig;
+      }
+
+      /++
+         Name to use when generating log file names.
+
+         The default value is the program name.
+       +/
+      @property string name(string name) { return _name = name; }
+      @property const string name() { return _name; }
+
+      /++
+         Specifies if the logger should write to stderr. If this property is
+         set, then it only logs to stderr and not to files.
+
+         The default value is false.
+       +/
+      @property bool logToStderr(bool logToStderr)
+      {
+         return _logToStderr = logToStderr;
+      }
+      @property const bool logToStderr() { return _logToStderr; } /// ditto
+
+      /++
+         Specifies if the logger should write to stderr. If this property is
+         set, then it logs to stderr and to files.
+
+         The default value is false.
+       +/
+      @property bool alsoLogToStderr(bool alsoLogToStderr)
+      {
+         return _alsoLogToStderr = alsoLogToStderr;
+      }
+      /// ditto
+      @property const bool alsoLogToStderr() { return _alsoLogToStderr; }
+
+      /++
+         Specifies the _threshold at which log messages are logged to stderr.
+         Any message of higher or equal severity to threshold is written to
+         stderr.
+
+         The default value is $(D Severity.error).
+       +/
+      @property Severity stderrThreshold(Severity threshold)
+      {
+         return _stderrThreshold = threshold;
+      }
+      /// ditto
+      @property const Severity stderrThreshold() { return _stderrThreshold; }
+
+      /++
+         Specifies the directory where log files are created.
+
+         The default value for this property is the value in the enviroment
+         variable 'LOGDIR'. If 'LOGDIR' is not set, then 'TEST_TMPDIR' is
+         used. If 'TEST_TMPDIR' is not set, then it logs to the current
+         directory.
+       +/
+      @property string logDirectory(string logDirectory)
+      {
+         return _logDirectory = logDirectory;
+      }
+      @property const string logDirectory() { return _logDirectory; } /// ditto
+
+      /++
+         Specifies the buffer size for each log file.
+
+         The default value is 4KB.
+       +/
+      @property size_t bufferSize(size_t bufferSize)
+      {
+         return _bufferSize = bufferSize;
+      }
+      @property const size_t bufferSize() { return _bufferSize; } /// ditto
+
+      private string _name;
+      private bool _logToStderr;
+      private bool _alsoLogToStderr;
+      private Severity _stderrThreshold = Severity.error;
+      private string _logDirectory;
+      private size_t _bufferSize = 4 * 1024;
    }
 
    /++
-      Command line flag for logging to stderr. The default value is
-      "logtostderr" which at the command line is '--logtostderr'.
-    +/
-   static string logToStderrFlag = "logtostderr";
+      Constructs a logger with the configuration specified in loggerConfig.
 
-   /++
-      Command line flag for logging to stderr and files. The default value is
-      "alsologtostderr" which at the command line is '--alsologtostderr'.
+      This constructor is required by $(D initializeLogging).
     +/
-   static string alsoLogToStderrFlag = "alsologtostderr";
-
-   /++
-      Command line flag for setting the stderr logging threshold. The default
-      value is "stderrthreshold" which at the command line is
-      '--stderrthreshold'.
-    +/
-   static string stderrThresholdFlag = "stderrthreshold";
-
-   /++
-      Command line flag for setting the logging directory. The default value is
-      "logdir" which at the command line is '--logdir'.
-    +/
-   static string logDirectoryFlag = "logdir";
-
-   /++
-      Constructor that sets the property $(D loggerName) to name.
-    +/
-   this(string name)
+   private this(Configuration loggerConfig)
    {
-      _loggerName = name;
+      enforce(loggerConfig.name);
 
-      // get default log dir
-      _logDirectory = getenv("LOGDIR");
-      if(_logDirectory is null) _logDirectory = getenv("TEST_TMPDIR");
+      _bufferSize = loggerConfig.bufferSize;
+      _mutex = new Mutex;
+
+      // Create file for every severity; add one more for stderr
+      _writers = new File[numberOfLogFilters + 1];
+      _writers[$ - 1] = stderr; // add stderr
+
+      // create the indices for all the loggers
+      _indices = new size_t[][numberOfLogFilters];
+      foreach(i, ref index; _indices)
+      {
+         if(loggerConfig.logToStderr)
+         {
+            // Only log to stderr
+            if(i <= loggerConfig.stderrThreshold) index ~= _writers.length - 1;
+         }
+         else
+         {
+            // Add the file writers
+            foreach(j; i .. _writers.length - 1) index ~= j;
+
+            // Add stderr if needed
+            if(loggerConfig.alsoLogToStderr &&
+               i <= loggerConfig.stderrThreshold)
+            {
+               index ~= _writers.length - 1;
+            }
+         }
+      }
+
+      auto time = Clock.currTime(UTC());
+      // we dont need fracsec for the file name.
+      time.fracSec = FracSec.from!"msecs"(0);
+
+      // create the file name for all the writers
+      foreach(severity; 0 .. _writers.length - 1)
+      {
+         _filenames ~= join(loggerConfig.logDirectory,
+                            text(loggerConfig.name,
+                                 ".log.",
+                                 toupper(to!string(cast(Severity)severity)),
+                                 ".",
+                                 time.toISOString()));
+      }
    }
 
-   /// Name to use when generating log file names.
-   @property const string loggerName() { return _loggerName; }
-
-   /++
-      Specifies if the logger should write to stderr. If this property is set,
-      then it only logs to stderr and not to files.
-
-      The default value is false.
-    +/
-   @property void logToStderr(bool logToStderr) { _logToStderr = logToStderr; }
-   @property const bool logToStderr() { return _logToStderr; } /// ditto
-
-   /++
-      Specifies if the logger should write to stderr. If this property is set,
-      then it logs to stderr and to files.
-
-      The default value is false.
-    +/
-   @property void alsoLogToStderr(bool alsoLogToStderr)
+   private static int numberOfLogFilters() pure nothrow
    {
-      _alsoLogToStderr = alsoLogToStderr;
-   }
-   @property const bool alsoLogToStderr() { return _alsoLogToStderr; } /// ditto
-
-   /++
-      Specifies the _threshold at which log messages are logged to stderr. Any
-      message of higher or equal severity to threshold is written to stderr.
-
-      The default value is $(D Severity.error).
-    +/
-   @property void stderrThreshold(Severity threshold)
-   {
-      _stderrThreshold = threshold;
-   }
-   /// ditto
-   @property const Severity stderrThreshold()
-   {
-      return _stderrThreshold;
+      static if(is(typeof(fatal) == NoopLogFilter)) return 0;
+      else static if(is(typeof(critical) == NoopLogFilter)) return  1;
+      else static if(is(typeof(error) == NoopLogFilter)) return  2;
+      else static if(is(typeof(warning) == NoopLogFilter)) return 3;
+      else static if(is(typeof(info) == NoopLogFilter)) return 4;
+      else return 5;
    }
 
-   /++
-      Specifies the directory where log files are created.
-
-      The default value for this property is the value in the enviroment
-      variable 'LOGDIR'. If 'LOGDIR' is not set, then 'TEST_TMPDIR' is used. If
-      'TEST_TMPDIR' is not set, then it logs to the current directory.
-    +/
-   @property void logDirectory(string logDirectory)
+   /// Writes a _log message to all the _log files of equal or lower severity.
+   shared void log(const ref LogMessage message)
    {
-      _logDirectory = logDirectory;
+      synchronized(_mutex)
+      {
+         foreach(i; _indices[message.severity])
+         {
+            // open file if is not opened and we have a name for it
+            if(!_writers[i].isOpen && i < _filenames.length)
+            {
+               _writers[i].open(_filenames[i], "w");
+               _writers[i].setvbuf(_bufferSize);
+            }
+            _writers[i].writefln("%s:%s:%s:%x:%s %s",
+                                 message.file,
+                                 message.line,
+                                 toupper(to!string(message.severity)),
+                                 message.threadId,
+                                 message.time.toISOString(),
+                                 message.message);
+         }
+      }
    }
-   @property const string logDirectory() { return _logDirectory; } /// ditto
 
-   /++
-      Specifies the buffer size for each log file.
+   /// Flushes the buffer of all the log files.
+   shared void flush()
+   {
+      synchronized(_mutex)
+      {
+         foreach(ref writer; _writers[0 .. $ - 1])
+         {
+            if(writer.isOpen) writer.flush();
+         }
+      }
+   }
 
-      The default value is 4KB.
-    +/
-   @property void bufferSize(size_t bufferSize) { _bufferSize = bufferSize; }
-   @property const size_t bufferSize() { return _bufferSize; } /// ditto
+   private size_t _bufferSize;
+   private bool _initialized;
 
-   private string _loggerName;
-   private bool _logToStderr;
-   private bool _alsoLogToStderr;
-   private Severity _stderrThreshold = Severity.error;
-   private string _logDirectory;
-   private size_t _bufferSize = 4 * 1024;
+   private Mutex _mutex; // rwmutex wont preserve the order
+   private string[] _filenames;
+   private size_t[][] _indices;
+   __gshared File[] _writers;
 }
 
 /++
@@ -1323,147 +1545,6 @@ The method must not return until all pending log operations complete.
       /// Time when the log message was created.
       SysTime time;
    }
-}
-
-/++
-Default $(D Logger) implementation.
-
-This logger implements all the configuration option described in
-$(D LoggerConfig). This logger writes log messages to multiple files. There is
-a file for every severity level. Log messages of a given severity are written
-to all the log files of an equal or lower severity. E.g. A log message of
-severity warning will be written to the log files for warning and info but not
-to the log files of fatal and error.
-+/
-class SharedLogger : Logger
-{
-   /++
-      Constructs a logger with the configuration specified in loggerConfig.
-
-      This constructor is required by $(D initializeLogging).
-    +/
-   private this(LoggerConfig loggerConfig)
-   {
-      enforce(loggerConfig.loggerName);
-
-      _loggerConfig = loggerConfig;
-      _mutex = new Mutex;
-
-      // Create file for every severity
-      enum logFilters = numberOfLogFilters();
-
-      // Add one more for stderr
-      auto numberOfWriters = logFilters == 0 ? 0 : logFilters + 1;
-
-      _writers = new File[numberOfWriters];
-
-      // create the indices for all the loggers
-      _indices = new size_t[][logFilters];
-      foreach(i, ref index; _indices)
-      {
-         if(_loggerConfig.logToStderr)
-         {
-            // Only log to stderr
-            if(i <= _loggerConfig.stderrThreshold) index ~= _writers.length - 1;
-         }
-         else
-         {
-            // Add the file writers
-            foreach(j; i .. logFilters) index ~= j;
-
-            // Add stderr if needed
-            if(_loggerConfig.alsoLogToStderr &&
-               i <= _loggerConfig.stderrThreshold)
-            {
-               index ~= _writers.length - 1;
-            }
-         }
-      }
-   }
-
-   private static int numberOfLogFilters() pure nothrow
-   {
-      static if(is(typeof(fatal) == NoopLogFilter)) return 0;
-      else static if(is(typeof(critical) == NoopLogFilter)) return  1;
-      else static if(is(typeof(error) == NoopLogFilter)) return  2;
-      else static if(is(typeof(warning) == NoopLogFilter)) return 3;
-      else static if(is(typeof(info) == NoopLogFilter)) return 4;
-      else return 5;
-   }
-
-   private shared void initialize()
-   {
-      if(_initialized) return;
-
-      scope(success) _initialized = true;
-
-      auto time = cast(DateTime) Clock.currTime();
-
-      // Add stderr
-      if(_writers.length)
-      {
-         // add stderr if we are going to log
-         assert(_writers.length > 1);
-         _writers[$ - 1] = stderr;
-      }
-
-      // create the file name for all the writers
-      foreach(severity; 0 .. _writers.length - 1)
-      {
-         _filenames ~= join(_loggerConfig.logDirectory,
-                            text(_loggerConfig.loggerName,
-                                 ".log.",
-                                 toupper(to!string(cast(Severity)severity)),
-                                 ".",
-                                 time.toISOString()));
-      }
-      _filenames ~= ""; // empty string represent stderr
-   }
-
-   /// Writes a _log message to all the _log files of equal or lower severity.
-   shared void log(const ref LogMessage message)
-   {
-      synchronized(_mutex)
-      {
-         initialize();
-         foreach(i; _indices[message.severity])
-         {
-            if(!_writers[i].isOpen)
-            {
-               _writers[i].open(_filenames[i], "w");
-               _writers[i].setvbuf(_loggerConfig.bufferSize);
-            }
-            _writers[i].writefln("%s:%s:%s:%x:%s %s",
-                                 message.file,
-                                 message.line,
-                                 toupper(to!string(message.severity)),
-                                 message.threadId,
-                                 message.time.toISOString(),
-                                 message.message);
-         }
-      }
-   }
-
-   /// Flushes the buffer of all the log files.
-   shared void flush()
-   {
-      synchronized(_mutex)
-      {
-         initialize();
-         foreach(ref writer; _writers[0 .. $ - 1])
-         {
-            if(writer.isOpen) writer.flush();
-         }
-      }
-   }
-
-   private __gshared LoggerConfig _loggerConfig;
-   private bool _initialized;
-
-   private Mutex _mutex; // rwmutex wont preserve the order
-   private string[] _filenames;
-   private size_t[][] _indices;
-   __gshared File[] _writers;
 }
 
 unittest
@@ -1662,22 +1743,22 @@ bool after(string file = __FILE__, int line = __LINE__)(Duration n)
 
 static this()
 {
-   fatal.initialize(Severity.fatal, config);
-   critical.initialize(Severity.critical, config);
+   fatal.initialize(config);
+   critical.initialize(config);
 
-   if(is(typeof(error) == LogFilter))
+   static if(is(typeof(error) == LogFilter!(Severity.error)))
    {
-      error.initialize(Severity.error, config);
+      error.initialize(config);
    }
 
-   if(is(typeof(warning) == LogFilter))
+   static if(is(typeof(warning) == LogFilter!(Severity.warning)))
    {
-      warning.initialize(Severity.warning, config);
+      warning.initialize(config);
    }
 
-   if(is(typeof(info) == LogFilter))
+   static if(is(typeof(info) == LogFilter!(Severity.info)))
    {
-      info.initialize(Severity.info, config);
+      info.initialize(config);
    }
 }
 
@@ -1685,10 +1766,16 @@ shared static this()
 {
    auto args = Runtime.args;
 
-   // XXX should try and catch this...
-   auto logger = new SharedLogger(LoggerConfig.create(args));
+   auto loggerConfig = FileLogger.Configuration.create();
+
+   try loggerConfig.initialize(args);
+   catch(Exception e) { /+ ignore any error +/ }
+
+   auto logger = new FileLogger(loggerConfig);
    config = new Configuration(logger);
-   config.initialize(args);
+
+   try config.initialize(args);
+   catch(Exception e) { /+ ignore any error +/ }
 }
 
 __gshared Configuration config;
@@ -1702,7 +1789,7 @@ version(unittest)
       {
          called = true;
          severity = msg.severity;
-         message = cast(shared)msg.message;
+         message = msg.message.idup;
       }
 
       shared void flush()
@@ -1717,7 +1804,7 @@ version(unittest)
          flushCalled = false;
       }
 
-      const(char)[] message;
+      string message;
       Severity severity;
       bool called;
       bool flushCalled;
