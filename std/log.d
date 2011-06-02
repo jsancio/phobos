@@ -1,6 +1,5 @@
 // Written in the D programming language.
-// XXX Allow changing configuration after init. Remove FilterConfig and
-//     VerboseConfig.
+// XXX Remove LoggerConfig
 // XXX write unittest for SharedLogger
 // XXX make sure that the examples are correct.
 // XXX rename dfatal and vlog to debugFatal and verbose.
@@ -42,7 +41,7 @@ messages are logged using $(D vlog).
 If the module is not initialized it will configure itself using the command
 line arguments passed to the process and the process's enviroment variables.
 For a list of command line option and enviroment variable, and their meaning
-see $(D FilterConfig) and $(D LoggerConfig).
+see $(D Configuration) and $(D LoggerConfig).
 
 Example:
 ---
@@ -160,7 +159,7 @@ critical("A critical message!");
       Error log messages are disabled at compiled time by setting the version
       to 'strip_log_error'. Error log messages are disabled at run time by
       setting the minimun severity to $(D Level.fatal) or $(D Level.critical)
-      in $(D FilterConfig). Disabling _error log messages at compile time or
+      in $(D Configuration). Disabling _error log messages at compile time or
       at run time also disables lower severity messages, e.g. warning and
       info.
 
@@ -174,7 +173,7 @@ error("An error message!");
    /++
       Warning log messages are disabled at compiled time by setting the version
       to 'strip_log_warning'. Warning log messages are disabled at run time by
-      setting the minimum severity to $(D Level.error) in $(D FilterConfig).
+      setting the minimum severity to $(D Level.error) in $(D Configuration).
       Disabling _warning log messages at compile time or at run time also
       disables lower severity messages, e.g. info.
 
@@ -188,7 +187,7 @@ warning("A warning message!");
    /++
       Info log messages are disabled at compiled time by setting the version to
       'strip_log_info'. Info log messages are disabled at run time by setting
-      the minimum severity to $(D Level.warning) in $(D FilterConfig).
+      the minimum severity to $(D Level.warning) in $(D Configuration).
       Disabling _info log messages at compile time or at run time also disables
       verbose log messages.
 
@@ -204,7 +203,7 @@ info("An info message!");
       at compile time set the version to 'strip_log_info' which also disables
       all messages of info severity at compile time. To enable verbose log
       messages at run time use the the maximum verbose _level property and the
-      module filter property in $(D FilterConfig.VerboseConfig).
+      verbose filter property in $(D Configuration).
 
       Example:
       ---
@@ -238,7 +237,7 @@ else
       }
       else
       {
-         return LogFilter.vlog(level, _moduleConfig, info, file);
+         return LogFilter.vlog(level, config, info, file);
       }
    }
 }
@@ -251,27 +250,18 @@ unittest
    LogFilter logCritical;
    LogFilter logFatal;
 
-   auto testConfig = new ModuleConfig;
+   auto logger = cast(shared) new TestLogger();
+   auto testConfig = new Configuration(logger);
+   testConfig.minSeverity = Severity.warning;
 
    // logger shouldn't log if not init
    assert(!logInfo.willLog);
 
-   // logger shouldn't log if module configured
-   logInfo.init(Severity.info, testConfig);
-   assert(!logInfo.willLog);
-
-   FilterConfig filterConfig;
-   filterConfig.minSeverity = Severity.warning;
-
-   auto logger = cast(shared) new SeverityFilter();
-   filterConfig._logger = logger;
-
-   testConfig.init(filterConfig);
-
-   logWarning.init(Severity.warning, testConfig);
-   logError.init(Severity.error, testConfig);
-   logCritical.init(Severity.critical, testConfig);
-   logFatal.init(Severity.fatal, testConfig);
+   logInfo.initialize(Severity.info, testConfig);
+   logWarning.initialize(Severity.warning, testConfig);
+   logError.initialize(Severity.error, testConfig);
+   logCritical.initialize(Severity.critical, testConfig);
+   logFatal.initialize(Severity.fatal, testConfig);
 
    auto loggedMessage = "logged message";
 
@@ -364,9 +354,9 @@ defined condition are true.
 +/
 struct LogFilter
 {
-   private void init(Severity severity, ModuleConfig config)
+   private void initialize(Severity severity, Configuration configuration)
    {
-      _config = config;
+      _config = configuration;
 
       _message.severity = severity;
       // XXX remove this when druntime is fixed.
@@ -393,7 +383,7 @@ if(error.willLog)
    @property bool willLog()
    {
       return _config !is null &&
-             _message.severity <= _config.severity;
+             _message.severity <= _config.minSeverity;
    }
 
    /++
@@ -543,28 +533,19 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
 
       LogFilter logInfo;
       LogFilter logWarning;
-      auto testConfig = new ModuleConfig;
 
-      logInfo.init(Severity.info, testConfig);
-      logWarning.init(Severity.warning, testConfig);
+      auto logger = cast(shared) new TestLogger();
+      auto testConfig = new Configuration(logger);
+      testConfig.minSeverity = Severity.warning;
+      testConfig.maxVerboseLevel = 3;
+      testConfig.verboseFilter = "*log.d=2";
 
-      // verbose logging shouldn't throw if module not init
-      auto verboseLog = LogFilter.vlog(0, testConfig, logWarning);
-      assert(!verboseLog.willLog);
-
-      FilterConfig filterConfig;
-      filterConfig.minSeverity = Severity.warning;
-      filterConfig.verboseConfig.maxVerboseLevel = 3;
-      filterConfig.verboseConfig.moduleFilter = "*log.d=2";
-
-      auto logger = cast(shared) new SeverityFilter();
-      filterConfig._logger = logger;
-
-      testConfig.init(filterConfig);
+      logInfo.initialize(Severity.info, testConfig);
+      logWarning.initialize(Severity.warning, testConfig);
 
       // Test vlogging and module filtering
       logger.clear();
-      verboseLog = LogFilter.vlog(2, testConfig, logWarning);
+      auto verboseLog = LogFilter.vlog(2, testConfig, logWarning);
       assert(verboseLog.willLog);
       verboseLog(loggedMessage);
       assert(logger.called);
@@ -607,11 +588,11 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
    }
 
    private static ref LogFilter vlog(short level,
-                                     ModuleConfig config,
+                                     Configuration configuration,
                                      ref LogFilter logger,
                                      string file = __FILE__)
    {
-      if(logger.willLog && config.matchesVerboseConfig(file, level))
+      if(logger.willLog && configuration.matchesVerboseFilter(file, level))
       {
          return logger;
       }
@@ -622,7 +603,7 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
    private Logger.LogMessage _message;
    private Appender!(char[]) _writer;
 
-   private ModuleConfig _config;
+   private Configuration _config;
 
    private static __gshared LogFilter _noopLogFilter;
 }
@@ -679,74 +660,84 @@ enum Severity
 unittest
 {
    // assert default values
-   FilterConfig filterConfig;
-   assert(filterConfig._minSeverity == Severity.error);
+   auto testConfig = new Configuration(cast(shared) new TestLogger());
+   assert(testConfig.minSeverity == Severity.error);
 
    auto name = "program_name";
    auto args = [name,
-                "--" ~ FilterConfig.minSeverityFlag,
+                "--" ~ Configuration.minSeverityFlag,
                 "info",
-                "--" ~ FilterConfig.VerboseConfig.moduleFilterFlag,
+                "--" ~ Configuration.verboseFilterFlag,
                 "*logging=2,module=0",
-                "--" ~ FilterConfig.VerboseConfig.maxVerboseLevelFlag,
+                "--" ~ Configuration.maxVerboseLevelFlag,
                 "3",
                 "--ignoredOption"];
 
-   filterConfig = FilterConfig.create(args);
+   testConfig.initialize(args);
 
    // assert that all expected options where removed
    assert(args.length == 2);
    assert(args[0] == name);
 
-   assert(filterConfig._minSeverity == Severity.info);
+   assert(testConfig.minSeverity == Severity.info);
 
    // assert max verbose level
-   assert(filterConfig._verboseConfig.matches("file", 3));
+   assert(testConfig.matchesVerboseFilter("file", 3));
 
    // assert vmodule entries
-   assert(filterConfig._verboseConfig.matches("std/logging.d", 2));
-   assert(filterConfig._verboseConfig.matches("module.d", 0));
+   assert(testConfig.matchesVerboseFilter("std/logging.d", 2));
+   assert(testConfig.matchesVerboseFilter("module.d", 0));
 }
 
 /++
-Module configuration structure.
+Module configuration.
 
 This object is used to configure the logging module if the default behavior is
 not wanted.
 +/
-struct FilterConfig
+final class Configuration
 {
    /++
-      Create a configuration object based on the passed parameter.
+      Initialize the configuration object based on the passed parameter.
 
       The function processes every entry in commandLine looking for valid
       command line options. All of the valid options are enumerated in the
       static fields of this structure that end in 'Flag', e.g. minSeverityFlag.
       When a valid command line option is found its value is stored in the
-      mapping object's property. For any property not set explictly its default
-      value is used. Here is a list of all the flags and how they map to the
-      object's property:
+      mapping object's property and it is removed from commandLine. For any
+      property not set explictly its default value is used. Here is a list of
+      all the flags and how they map to the object's property:
 
       $(UL
-         $(LI $(D minSeverityFlag) maps to $(D minSeverity)))
+         $(LI $(D minSeverityFlag) maps to $(D minSeverity))
+         $(LI $(D verboseFilterFlag) maps to $(D verboseFilter))
+         $(LI $(D maxVerboseLevelFlag) maps to $(D maxVerboseLevel)))
 
       Any valid field is removed from commandLine; any invalid field is left in
       commandLine.
 
-      After processing all the flags beloging to FilterConfig the remaining
-      arguments are passed to $(D FilterConfig.VerboseConfig) for processing.
+      Note:
+      A call to the function is not required if the module will be initialized
+      using the command line's default options.
     +/
-   static FilterConfig create(ref string[] commandLine)
+   void initialize(ref string[] commandLine)
    {
-      FilterConfig filterConfig;
+      void handleOption(string option, string value)
+      {
+         if(option == minSeverityFlag) minSeverity = to!Severity(value);
+         else if(option == verboseFilterFlag) verboseFilter = value;
+         else if(option == maxVerboseLevelFlag)
+         {
+            maxVerboseLevel = to!short(value);
+         }
+         else enforce(false);
+      }
 
       getopt(commandLine,
              std.getopt.config.passThrough,
-             minSeverityFlag, &filterConfig._minSeverity);
-
-      filterConfig._verboseConfig = VerboseConfig.create(commandLine);
-
-      return filterConfig;
+             minSeverityFlag, &handleOption,
+             verboseFilterFlag, &handleOption,
+             maxVerboseLevelFlag, &handleOption);
    }
 
    /++
@@ -756,6 +747,27 @@ struct FilterConfig
    static string minSeverityFlag = "minloglevel";
 
    /++
+      Command line flag for setting the verbose configuration per module.  The
+      default value is "vmodule" which at the command line is '--vmodule'.
+    +/
+   static string verboseFilterFlag = "vmodule";
+
+   /++
+      Command line flag for setting the maximum verbose level. The default
+      value is "v" which at the command line is '--v'.
+    +/
+   static string maxVerboseLevelFlag = "v";
+
+   unittest
+   {
+      auto testConfig = new Configuration(cast(shared) new TestLogger());
+
+      assert((testConfig.minSeverity = Severity.fatal) == Severity.critical);
+      assert((testConfig.minSeverity = Severity.critical) == Severity.critical);
+      assert((testConfig.minSeverity = Severity.error) == Severity.error);
+   }
+
+   /++
       Specifies the minimum _severity of the messages that are logged.
 
       Only messages with a _severity greater than or equal to the value of this
@@ -763,17 +775,191 @@ struct FilterConfig
 
       The default value is $(D Severity.error).
     +/
-   @property void minSeverity(Severity severity)
+   @property Severity minSeverity(Severity severity)
    {
-      _minSeverity = severity;
+      enforce(_rwmutex.writer.tryLock);
+      scope(exit) _rwmutex.writer.unlock;
+
+      // cannot disable critical severity
+      _minSeverity = severity < Severity.critical ?
+                                Severity.critical :
+                                severity;
+      return _minSeverity;
+   }
+   /// ditto
+   @property Severity minSeverity()
+   {
+      synchronized(_rwmutex.reader) return _minSeverity;
+   }
+
+   unittest
+   {
+      auto testConfig = new Configuration(cast(shared) new TestLogger());
+
+      // Test max verbose level
+      testConfig.maxVerboseLevel = 1;
+      assert(testConfig.matchesVerboseFilter("file", 1));
+      assert(testConfig.matchesVerboseFilter("file", 0));
+      assert(!testConfig.matchesVerboseFilter("file", 2));
+
+      assert(testConfig.maxVerboseLevel == 1);
    }
 
    /++
-      Returns the $(D FilterConfig.VerboseConfig) enclosed by this object.
+      Specifies the maximum verbose _level of verbose messages that can logged.
+
+      Verbose messages with a verbose _level less than or equal to the value of
+      this property are logged. This property is ignore of the module logging
+      the verbose message matches a module specified in the verbose
+      configuration for modules property.
+
+      The default value is $(D short.min).
     +/
-   @property ref VerboseConfig verboseConfig()
+   @property short maxVerboseLevel(short level)
    {
-      return _verboseConfig;
+      enforce(_rwmutex.writer.tryLock);
+      scope(exit) _rwmutex.writer.unlock;
+      _level = level;
+
+      return _level;
+   }
+   /// ditto
+   @property short maxVerboseLevel()
+   {
+      synchronized(_rwmutex.reader) return _level;
+   }
+
+   unittest
+   {
+      auto vmodule = "module=1,*another=3,even*=2,cat?=4,*dog?=1,evenmore=10";
+      auto testConfig = new Configuration(cast(shared) new TestLogger());
+      testConfig.verboseFilter = vmodule;
+
+      // Test exact patterns
+      assert(testConfig.matchesVerboseFilter("module", 1));
+      assert(testConfig.matchesVerboseFilter("module.d", 1));
+      assert(!testConfig.matchesVerboseFilter("amodule", 1));
+
+      // Test *
+      assert(testConfig.matchesVerboseFilter("package/another", 3));
+      assert(testConfig.matchesVerboseFilter("package/another.d", 3));
+      assert(!testConfig.matchesVerboseFilter("package/dontknow", 3));
+
+      assert(testConfig.matchesVerboseFilter("evenmore", 2));
+      assert(testConfig.matchesVerboseFilter("evenmore.d", 2));
+      assert(!testConfig.matchesVerboseFilter("package/evenmore.d", 2));
+
+      // Test ?
+      assert(testConfig.matchesVerboseFilter("cats.d", 4));
+      assert(!testConfig.matchesVerboseFilter("cat", 4));
+
+      // Test * and ?
+      assert(testConfig.matchesVerboseFilter("package/dogs.d", 1));
+      assert(!testConfig.matchesVerboseFilter("package/doggies.d", 1));
+      assert(!testConfig.matchesVerboseFilter("package/horse", 1));
+
+      // Test that it can match any of the entries
+      assert(testConfig.matchesVerboseFilter("evenmore.d", 10));
+
+      // Test invalid strings
+      try { testConfig.verboseFilter = "module=2,"; assert(false); }
+      catch (Exception e) {}
+
+      try { testConfig.verboseFilter = "module=a"; assert(false); }
+      catch (Exception e) {}
+
+      try { testConfig.verboseFilter = "module=2,another="; assert(false); }
+      catch (Exception e) {}
+
+      // assert output
+      assert(vmodule == testConfig.verboseFilter);
+   }
+
+   /++
+      Specifies the verbose configuration for modules.
+
+      A verbose message with level $(D x) is get logged at severity level info
+      if there is an entry that matches to the source file and the verbose
+      level of that entry is greater than or equal to $(D x).
+
+      The format of the configuration string is as follow
+      "[pattern]=[level],...", where '[pattern]' may contain any character
+      allowed in a file name and '[level]' is convertible to an integer.
+      Every '*' in '[pattern]' matches any number of characters. Every '?' in
+      '[pattern]' matches exactly one character.
+
+      For every '[pattern]=[level]' in the configuration string an entry is
+      created.
+
+      Example:
+      ---
+config.verboseFilter = "module=2,great*=3,*test=1";
+      ---
+
+      The code above sets a verbose logging configuration that:
+      $(UL
+         $(LI Log verbose 2 and lower messages from 'module{,.d}')
+         $(LI Log verbose 3 and lower messages from anyting starting with
+              'great')
+         $(LI Log verbose 1 and lower messages from any file that ends with
+              'test{,.d}'))
+
+      Note: If the module trying to log a verbose message matches but the
+      verbose level don't match, then the maximum verbose level property is
+      ignored.
+
+      E.g. In the default configuration if the command line contains "--v=2
+      --vmodule=web=1".
+      ---
+module web;
+
+// ...
+
+vlog(2)("Verbose message is not logged");
+      ---
+
+      The verbose message is not logged even though it is less than or equal to
+      2, as specified in the command line.
+
+      The default value is $(D null).
+    +/
+   @property string verboseFilter(string vmodule)
+   {
+      enforce(_rwmutex.writer.tryLock);
+      scope(exit) _rwmutex.writer.unlock;
+
+      typeof(_modulePatterns) patterns;
+      typeof(_moduleLevels) levels;
+
+      foreach(entry; splitter(vmodule, ","))
+      {
+         enforce(entry != "");
+
+         auto entryParts = array(splitter(entry, "="));
+         enforce(entryParts.length == 2);
+         enforce(entryParts[0] != "");
+
+         string altName;
+         if(!endsWith(entryParts[0], ".d"))
+         {
+            altName = entryParts[0] ~ ".d";
+         }
+
+         patterns ~= [ entryParts[0], altName ];
+         levels ~= to!short(entryParts[1]);
+      }
+      assert(patterns.length == levels.length);
+
+      _modulePatterns = patterns;
+      _moduleLevels = levels;
+      _vmodule = vmodule;
+
+      return _vmodule;
+   }
+   /// ditto
+   @property string verboseFilter()
+   {
+      synchronized(_rwmutex.reader) return _vmodule;
    }
 
    /++
@@ -783,226 +969,87 @@ struct FilterConfig
       function handler should not return; otherwise the framework calls
       $(D assert(false)).
 
-      The default value is $(D null).
+      The default value is $(D function void() {}).
     +/
-   @property void fatalHandler(void function() handler)
+   @property void function() fatalHandler(void function() handler)
    {
-      _fatalHandler = handler;
-   }
+      enforce(_rwmutex.writer.tryLock);
+      scope(exit) _rwmutex.writer.unlock;
 
-   unittest
-   {
-      auto vmodule = "module=1,*another=3,even*=2,cat?=4,*dog?=1,evenmore=10";
-      VerboseConfig result;
-      result.moduleFilter = vmodule;
+      _fatalHandler = handler ? handler : function void() {};
 
-      // Test exact patterns
-      assert(result.matches("module", 1));
-      assert(result.matches("module.d", 1));
-      assert(!result.matches("amodule", 1));
-
-      // Test *
-      assert(result.matches("package/another", 3));
-      assert(result.matches("package/another.d", 3));
-      assert(!result.matches("package/dontknow", 3));
-
-      assert(result.matches("evenmore", 2));
-      assert(result.matches("evenmore.d", 2));
-      assert(!result.matches("package/evenmore.d", 2));
-
-      // Test ?
-      assert(result.matches("cats.d", 4));
-      assert(!result.matches("cat", 4));
-
-      // Test * and ?
-      assert(result.matches("package/dogs.d", 1));
-      assert(!result.matches("package/doggies.d", 1));
-      assert(!result.matches("package/horse", 1));
-
-      // Test that it can match any of the entries
-      assert(result.matches("evenmore.d", 10));
-
-      // Test invalid strings
-      try { result.moduleFilter = "module=2,"; assert(false); }
-      catch (Exception e) {}
-
-      try { result.moduleFilter = "module=a"; assert(false); }
-      catch (Exception e) {}
-
-      try { result.moduleFilter = "module=2,another="; assert(false); }
-      catch (Exception e) {}
-
-      // Test max verbose level
-      result.moduleFilter = null;
-      result.maxVerboseLevel = 1;
-      assert(result.matches("file", 1));
-      assert(result.matches("file", 0));
-      assert(!result.matches("file", 2));
+      return _fatalHandler;
    }
 
    /++
-      Structure for configuring verbose logging.
+      Implementation of the $(D Logger) interface used to persiste log messages
 
-      This structure is used to control verbose logging globally or  on a per
-      module basis.
+      This property allows the caller to change and configure the the backend
+      logger to a different $(D Logger). It will throw an exception if it is
+      changed after a logging call has been made.
+
+      The default value is $(D SharedLogger).
+
+      Example:
+      ---
+import std.log;
+
+class NullLogger : Logger
+{
+   this(LoggerConfig config) {}
+   shared void log(const ref LogMessage message) {}
+   shared void flush() {}
+}
+
+void main(string[] args)
+{
+   configuration.logger = new NullLogger(LoggerConfig.create(args));
+   // ...
+}
+      ---
+      This example disables writing log messages at run time.
     +/
-   struct VerboseConfig
+   @property shared(Logger) logger(shared(Logger) logger)
    {
-      /++
-         Create a configuration object based on the passed parameter.
+      enforce(logger);
 
-         The function processes every entry in commandLine looking for valid
-         command line options. All of the valid options are enumerated in the
-         static fields of this structure that end in 'Flag', e.g.
-         maxVerboseLevelFlag. When a valid command line option is found its
-         value is stored in the mapping object's property. For any property not
-         set explictly its default value is used. Here is a list of all the
-         flags and how they map to the object's property:
+      enforce(_rwmutex.writer.tryLock);
+      scope(exit) _rwmutex.writer.unlock;
 
-         $(UL
-            $(LI $(D moduleFilterFlag) maps to $(D moduleFilter))
-            $(LI $(D maxVerboseLevelFlag) maps to $(D maxVerboseLevel)))
+      // it is a error if the user tries to init after the logger has been used
+      enforce(!_loggerUsed);
+      _logger = logger;
 
-         Any valid field is removed from commandLine; any invalid field is left
-         in commandLine.
-       +/
-      static VerboseConfig create(ref string[] commandLine)
+      return _logger;
+   }
+   /// ditto
+   @property shared(Logger) logger()
+   {
+      synchronized(_rwmutex.reader)
       {
-         VerboseConfig result;
-
-         void vmodule(string option, string value)
-         {
-            result.moduleFilter = value;
-         }
-
-         getopt(commandLine,
-               std.getopt.config.passThrough,
-               moduleFilterFlag, &vmodule,
-               maxVerboseLevelFlag, &result._level);
-
-
-         return result;
+         // Somebody asked for the logger don't allow changing it
+         _loggerUsed = true;
+         return _logger;
       }
+   }
 
-      /++
-         Command line flag for setting the verbose configuration per module.
-         The default value is "vmodule" which at the command line is
-         '--vmodule'.
-       +/
-      static string moduleFilterFlag = "vmodule";
+   private this(shared(Logger) logger)
+   {
+      enforce(logger);
 
-      /++
-         Command line flag for setting the maximum verbose level. The default
-         value is "v" which at the command line is '--v'.
-       +/
-      static string maxVerboseLevelFlag = "v";
+      _rwmutex = new ReadWriteMutex(ReadWriteMutex.Policy.PREFER_READERS);
+      _logger = logger;
+      _fatalHandler = function void() {};
+   }
 
-      /++
-         Specifies the maximum verbose _level of verbose messages that can
-         logged.
+   private @property void function() fatalHandler()
+   {
+      synchronized(_rwmutex.reader) return _fatalHandler;
+   }
 
-         Verbose messages with a verbose _level less than or equal to the
-         value of this property are logged. This property is ignore of the
-         module logging the verbose message matches a module specified in the
-         verbose configuration for modules property.
-
-         The default value is $(D short.min).
-       +/
-      @property void maxVerboseLevel(short level)
-      {
-         _level = level;
-      }
-
-      /++
-         Specifies the verbose configuration for modules.
-
-         A verbose message with level $(D x) is get logged at severity level
-         info if there is an entry that matches to the source file and the
-         verbose level of that entry is greater than or equal to $(D x).
-
-         The format of the configuration string is as follow
-         "[pattern]=[level],...", where '[pattern]' may contain any character
-         allowed in a file name and '[level]' is convertible to an integer.
-         Every '*' in '[pattern]' matches any number of characters.
-         Every '?' in '[pattern]' matches exactly one character.
-
-         For every '[pattern]=[level]' in the configuration string an entry is
-         created.
-
-         Example:
-         ---
-FilterConfig.VerboseConfig config;
-config.moduleFilter = "module=2,great*=3,*test=1";
-         ---
-
-         The code above sets a verbose logging configuration that:
-         $(UL
-            $(LI Log verbose 2 and lower messages from 'module{,.d}')
-            $(LI Log verbose 3 and lower messages from anyting starting with
-                 'great')
-            $(LI Log verbose 1 and lower messages from any file that ends with
-                 'test{,.d}'))
-
-         Note: If the module trying to log a verbose message matches but the
-         verbose level don't match, then the maximum verbose level property is
-         ignored.
-
-         E.g. In the default configuration if the command line contains "--v=2
-         --vmodule=web=1".
-         ---
-module web;
-
-// ...
-
-vlog(2)("Verbose message is not logged");
-         ---
-
-         The verbose message is not logged even though it is less than or equal
-         to 2, as specified in the command line.
-
-         The default value is $(D null).
-       +/
-      @property void moduleFilter(string config)
-      {
-         typeof(_modulePatterns) patterns;
-         typeof(_moduleLevels) levels;
-
-         foreach(entry; splitter(config, ","))
-         {
-            enforce(entry != "");
-
-            auto entryParts = array(splitter(entry, "="));
-            enforce(entryParts.length == 2);
-            enforce(entryParts[0] != "");
-
-            string altName;
-            if(!endsWith(entryParts[0], ".d"))
-            {
-               altName = entryParts[0] ~ ".d";
-            }
-
-            patterns ~= [ entryParts[0], altName ];
-            levels ~= to!short(entryParts[1]);
-         }
-         assert(patterns.length == levels.length);
-
-         _modulePatterns = patterns;
-         _moduleLevels = levels;
-      }
-
-      this(this)
-      {
-         _modulePatterns = _modulePatterns.dup;
-         _moduleLevels = _moduleLevels.dup;
-      }
-
-      ref VerboseConfig opAssign(VerboseConfig config)
-      {
-         swap(this, config);
-         return this;
-      }
-
-      private bool matches(string file, short level) const
+   private bool matchesVerboseFilter(string file, short level)
+   {
+      synchronized(_rwmutex.reader)
       {
          assert(_modulePatterns.length == _moduleLevels.length);
 
@@ -1022,16 +1069,22 @@ vlog(2)("Verbose message is not logged");
 
          return !matchedFile && level <= _level;
       }
-
-      private short _level = short.min;
-      private string[2][] _modulePatterns;
-      private short[] _moduleLevels;
    }
 
    private Severity _minSeverity = Severity.error;
-   private VerboseConfig _verboseConfig;
    private void function() _fatalHandler;
+
+   // verbose filtering variables
+   private short _level = short.min;
+   private string[2][] _modulePatterns;
+   private short[] _moduleLevels;
+   private string _vmodule;
+
+   // backend logger variables
+   private bool _loggerUsed;
    private shared Logger _logger;
+
+   private ReadWriteMutex _rwmutex;
 }
 
 unittest
@@ -1219,78 +1272,6 @@ public struct LoggerConfig
 }
 
 /++
-Initialize the logging infrastructure.
-
-A call to the function is not required if the module will be initialized using
-the command line's default options. It throws an exception if called after a
-logging call has been made.
-
-This function treats the parameter commandLine as the command line arguments to
-this process. Every valid option to this module will be removed from
-commandLine. For list of all the supported command line options see
-$(D FilterConfig) and $(D LoggerConfig).
-
-Example:
----
-import std.log;
-
-void main(string[] args)
-{
-   initLogging(args);
-   // ...
-}
----
-+/
-void initLogging(T : Logger = SharedLogger, LC = LoggerConfig)
-                (ref string[] commandLine)
-{
-   initLogging!T(LC.create(commandLine), FilterConfig.create(commandLine));
-}
-
-/++
-Initialize the logging infrastructure.
-
-A call to the function is not required if the module will be initialized using
-the command line's default options. It throws an exception if called after a
-logging call has been made.
-
-This function allows the caller to change and configure the the backend logger
-to a different $(D Logger).
-
-Params:
-   T = The type of the $(D Logger) to instanciate.
-   loggerConfig = The configuration object used by the logger. It will be
-                  passed to $(D T)'s constructor.
-   filterConfig = The configuration object used by $(D std.log).
-
-Example:
----
-import std.log;
-
-class NullLogger : Logger
-{
-   this(LoggerConfig config) {}
-   shared void log(const ref LogMessage message) {}
-   shared void flush() {}
-}
-
-void main(string[] args)
-{
-   initializeLogging!NullLogger(LoggerConfig.create(args),
-                                FilterConfig.create(args));
-   // ...
-}
----
-This example disables writing log messages at run time.
-+/
-void initLogging(T : Logger, LC)
-                (LC loggerConfig, FilterConfig filterConfig = FilterConfig())
-{
-   filterConfig._logger = cast(shared) new T(loggerConfig);
-   _moduleConfig.init(filterConfig);
-}
-
-/++
 Extension point for the module.
 +/
 interface Logger
@@ -1361,7 +1342,7 @@ class SharedLogger : Logger
 
       This constructor is required by $(D initializeLogging).
     +/
-   private this(const ref LoggerConfig loggerConfig)
+   private this(LoggerConfig loggerConfig)
    {
       enforce(loggerConfig.loggerName);
 
@@ -1410,7 +1391,7 @@ class SharedLogger : Logger
       else return 5;
    }
 
-   private shared void init()
+   private shared void initialize()
    {
       if(_initialized) return;
 
@@ -1444,7 +1425,7 @@ class SharedLogger : Logger
    {
       synchronized(_mutex)
       {
-         init();
+         initialize();
          foreach(i; _indices[message.severity])
          {
             if(!_writers[i].isOpen)
@@ -1468,7 +1449,7 @@ class SharedLogger : Logger
    {
       synchronized(_mutex)
       {
-         init();
+         initialize();
          foreach(ref writer; _writers[0 .. $ - 1])
          {
             if(writer.isOpen) writer.flush();
@@ -1679,121 +1660,43 @@ bool after(string file = __FILE__, int line = __LINE__)(Duration n)
    return false;
 }
 
-unittest
-{
-}
-
-private final class ModuleConfig
-{
-   this()
-   {
-      _rwmutex = new ReadWriteMutex(ReadWriteMutex.Policy.PREFER_READERS);
-   }
-
-   void init(FilterConfig filterConfig)
-   {
-      enforce(filterConfig._logger);
-
-      // there should really be no readers while the trying to init
-      enforce(_rwmutex.writer.tryLock);
-      scope(exit) _rwmutex.writer.unlock;
-
-      // it is a error if the user tries to init after the logger has been used
-      enforce(!_loggerUsed);
-
-      _verboseConfig = filterConfig._verboseConfig;
-
-      _logger = filterConfig._logger;
-
-      _severity = filterConfig._minSeverity;
-      // cannot disable critical severity
-      _severity = _severity < Severity.critical ?
-                              Severity.critical :
-                              _severity;
-
-      _fatalHandler =  filterConfig._fatalHandler ?
-                       filterConfig._fatalHandler :
-                       function {};
-   }
-
-   @property shared(Logger) logger()
-   {
-      synchronized(_rwmutex.reader)
-      {
-         // Somebody asked for the logger don't allow changing it
-         _loggerUsed = true;
-         return _logger;
-      }
-   }
-
-   @property Severity severity()
-   {
-      synchronized(_rwmutex.reader())
-      {
-         return _severity;
-      }
-   }
-
-   bool matchesVerboseConfig(string file, short level)
-   {
-      synchronized(_rwmutex.reader)
-      {
-         return _verboseConfig.matches(file, level);
-      }
-   }
-
-   @property void function() fatalHandler()
-   {
-      synchronized(_rwmutex.reader)
-      {
-         return _fatalHandler;
-      }
-   }
-
-   private bool _loggerUsed;
-   private shared Logger _logger;
-   private Severity _severity;
-   private FilterConfig.VerboseConfig _verboseConfig;
-   private void function() _fatalHandler;
-   private ReadWriteMutex _rwmutex;
-}
-
 static this()
 {
-   fatal.init(Severity.fatal, _moduleConfig);
-   critical.init(Severity.critical, _moduleConfig);
+   fatal.initialize(Severity.fatal, config);
+   critical.initialize(Severity.critical, config);
 
    if(is(typeof(error) == LogFilter))
    {
-      error.init(Severity.error, _moduleConfig);
+      error.initialize(Severity.error, config);
    }
 
    if(is(typeof(warning) == LogFilter))
    {
-      warning.init(Severity.warning, _moduleConfig);
+      warning.initialize(Severity.warning, config);
    }
 
    if(is(typeof(info) == LogFilter))
    {
-      info.init(Severity.info, _moduleConfig);
+      info.initialize(Severity.info, config);
    }
 }
 
 shared static this()
 {
-   _moduleConfig = new ModuleConfig;
+   auto args = Runtime.args;
 
    // XXX should try and catch this...
-   auto args = Runtime.args;
-   initLogging(args);
+   auto logger = new SharedLogger(LoggerConfig.create(args));
+   config = new Configuration(logger);
+   config.initialize(args);
 }
 
-private __gshared ModuleConfig _moduleConfig;
+__gshared Configuration config;
 
 version(unittest)
 {
    // Test severity filtering
-   class SeverityFilter : Logger
+   class TestLogger : Logger
    {
       shared void log(const ref LogMessage msg)
       {
