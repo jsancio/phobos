@@ -1,5 +1,4 @@
 // Written in the D programming language.
-// XXX write unittest for FileLogger
 // XXX add support for rich booleans in when()
 // XXX rename LogFilter
 // XXX test changing Flag in initialize for FileLogger.Configuration
@@ -109,7 +108,7 @@ import core.sync.rwmutex : ReadWriteMutex;
 import core.runtime : Runtime;
 import core.time : Duration;
 import std.stdio : File, stderr;
-import std.string : toupper;
+import std.string : newline, toupper;
 import std.conv : text, to;
 import std.datetime: Clock, SysTime, UTC, FracSec;
 import std.exception : enforce;
@@ -125,6 +124,8 @@ version(unittest)
    import core.exception : AssertError;
    import core.time : dur;
    import std.exception : assertThrown;
+   import std.algorithm : startsWith;
+   import std.stdio : writefln;
 }
 
 version(StdDdoc)
@@ -1063,7 +1064,7 @@ vlog(2)("Verbose message is not logged");
       logger to a different $(D Logger). It will throw an exception if it is
       changed after a logging call has been made.
 
-      The default value is $(D FileLogger).
+      The default value a $(D FileLogger).
 
       Example:
       ---
@@ -1162,6 +1163,118 @@ void main(string[] args)
    private ReadWriteMutex _rwmutex;
 }
 
+unittest
+{
+   ushort passed;
+   auto message = Logger.LogMessage.init;
+   message.time = Clock.currTime;
+
+   auto loggerConfig = FileLogger!(TestWriter).Configuration.create();
+   loggerConfig.name = "test";
+
+
+   // test info message
+   TestWriter.clear();
+   passed = 0;
+   message.severity = Severity.info;
+   auto logger = new shared(FileLogger!TestWriter)(loggerConfig);
+   logger.log(message);
+   foreach(ref key, ref data; TestWriter.writers)
+   {
+      if(startsWith(key, "test.log.INFO") && data.lines.length == 1)
+         ++passed;
+      else assert(data.lines.length == 0);
+   }
+   assert(passed == 1);
+
+   // test warning message
+   TestWriter.clear();
+   passed = 0;
+   message.severity = Severity.warning;
+   logger = new shared(FileLogger!TestWriter)(loggerConfig);
+   logger.log(message);
+   foreach(ref key, ref data; TestWriter.writers)
+   {
+      if(startsWith(key, "test.log.INFO") && data.lines.length == 1 ||
+         startsWith(key, "test.log.WARNING") && data.lines.length == 1)
+         ++passed;
+      else assert(data.lines.length == 0);
+   }
+   assert(passed == 2);
+
+   // test log to stderr
+   TestWriter.clear();
+   passed = 0;
+   message.severity = Severity.error;
+
+   loggerConfig.logToStderr = true;
+   loggerConfig.stderrThreshold = Severity.error;
+   logger = new shared(FileLogger!TestWriter)(loggerConfig);
+   logger.log(message);
+   foreach(ref key, ref data; TestWriter.writers)
+   {
+      if(key == "stderr file" && data.lines.length == 1)
+         ++passed;
+      else assert(data.lines.length == 0);
+   }
+   assert(passed == 1);
+
+   // test also log to stderr
+   TestWriter.clear();
+   passed = 0;
+   message.severity = Severity.error;
+
+   loggerConfig.logToStderr = false;
+   loggerConfig.alsoLogToStderr = true;
+   loggerConfig.stderrThreshold = Severity.error;
+   logger = new shared(FileLogger!TestWriter)(loggerConfig);
+   logger.log(message);
+   foreach(ref key, ref data; TestWriter.writers)
+   {
+      if(startsWith(key, "test.log.INFO") && data.lines.length == 1 ||
+         startsWith(key, "test.log.WARNING") && data.lines.length == 1 ||
+         startsWith(key, "test.log.ERROR") && data.lines.length == 1 ||
+         key == "stderr file" && data.lines.length == 1)
+         ++passed;
+      else assert(data.lines.length == 0);
+   }
+   assert(passed == 4);
+
+   // test log dir
+   TestWriter.clear();
+   passed = 0;
+   message.severity = Severity.info;
+
+   loggerConfig.logToStderr = false;
+   loggerConfig.alsoLogToStderr = false;
+   loggerConfig.logDirectory = "/dir";
+   logger = new shared(FileLogger!TestWriter)(loggerConfig);
+   logger.log(message);
+   foreach(ref key, ref data; TestWriter.writers)
+   {
+      if(startsWith(key, "/dir/test.log.INFO") && data.lines.length == 1)
+         ++passed;
+      else assert(data.lines.length == 0);
+   }
+   assert(passed == 1);
+
+   // test buffer size
+   TestWriter.clear();
+   passed = 0;
+   message.severity = Severity.info;
+
+   loggerConfig.logToStderr = false;
+   loggerConfig.alsoLogToStderr = false;
+   loggerConfig.logDirectory = "";
+   loggerConfig.bufferSize = 32;
+   logger = new shared(FileLogger!TestWriter)(loggerConfig);
+   logger.log(message);
+   foreach(ref key, ref data; TestWriter.writers)
+   {
+      if(startsWith(key, "/dir/test.log.INFO")) assert(data.bufferSize == 32);
+   }
+}
+
 /++
 Default $(D Logger) implementation.
 
@@ -1172,7 +1285,8 @@ severity are written to all the log files of an equal or lower severity. E.g.
 A log message of severity warning will be written to the log files for warning
 and info but not to the log files of fatal and error.
 +/
-class FileLogger : Logger
+class FileLogger(Writer) : Logger
+// XXX write test for Writer
 {
    unittest
    {
@@ -1396,7 +1510,7 @@ class FileLogger : Logger
       _mutex = new Mutex;
 
       // Create file for every severity; add one more for stderr
-      _writers = new File[numberOfLogFilters + 1];
+      _writers = new Writer[numberOfLogFilters + 1];
       _writers[$ - 1] = stderr; // add stderr
 
       // create the indices for all the loggers
@@ -1461,13 +1575,14 @@ class FileLogger : Logger
                _writers[i].open(_filenames[i], "w");
                _writers[i].setvbuf(_bufferSize);
             }
-            _writers[i].writefln("%s:%s:%s:%x:%s %s",
-                                 message.file,
-                                 message.line,
-                                 toupper(to!string(message.severity)),
-                                 message.threadId,
-                                 message.time.toISOString(),
-                                 message.message);
+            _writers[i].writef("%s:%s:%s:%x:%s %s%s",
+                               message.file,
+                               message.line,
+                               toupper(to!string(message.severity)),
+                               message.threadId,
+                               message.time.toISOString(),
+                               message.message,
+                               newline);
          }
       }
    }
@@ -1490,7 +1605,7 @@ class FileLogger : Logger
    private Mutex _mutex; // rwmutex wont preserve the order
    private string[] _filenames;
    private size_t[][] _indices;
-   __gshared File[] _writers;
+   __gshared Writer[] _writers;
 }
 
 /++
@@ -1766,12 +1881,12 @@ shared static this()
 {
    auto args = Runtime.args;
 
-   auto loggerConfig = FileLogger.Configuration.create();
+   auto loggerConfig = FileLogger!(File).Configuration.create();
 
    try loggerConfig.initialize(args);
    catch(Exception e) { /+ ignore any error +/ }
 
-   auto logger = new FileLogger(loggerConfig);
+   auto logger = new FileLogger!File(loggerConfig);
    config = new Configuration(logger);
 
    try config.initialize(args);
@@ -1808,5 +1923,62 @@ version(unittest)
       Severity severity;
       bool called;
       bool flushCalled;
+   }
+
+   struct TestWriter
+   {
+      struct Data
+      {
+         size_t bufferSize;
+         bool flushed;
+         string mode;
+
+         string[] lines;
+      }
+
+      @property const bool isOpen() { return (name in writers) !is null; }
+      void open(string filename, in char[] mode = "")
+      {
+         assert(name !in writers);
+         assert(filename !in writers);
+
+         name = filename;
+         writers[name] = Data.init;
+
+         writers[name].mode = mode.idup;
+      }
+
+      void setvbuf(size_t size, int mode = 0)
+      {
+         assert(name in writers);
+         writers[name].bufferSize = size;
+      }
+
+      void writef(S...)(S args)
+      {
+         assert(name in writers, name);
+         writer.clear();
+         formattedWrite(writer, args);
+         writers[name].lines ~= writer.data.idup;
+      }
+
+      void flush()
+      {
+         assert(name in writers);
+         writers[name].flushed = true;
+      }
+
+      void opAssign(File rhs)
+      {
+         // assume it is stderr
+         open("stderr file", "w");
+      }
+
+      string name;
+
+      static void clear() { writers = null; }
+
+      static Data[string] writers;
+      static Appender!(char[]) writer;
    }
 }
