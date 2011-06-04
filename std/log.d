@@ -1,5 +1,6 @@
 // Written in the D programming language.
 // XXX add support for rich booleans in when()
+// XXX write unittest for Rich!T
 // XXX rename LogFilter
 // XXX test changing Flag in initialize for FileLogger.Configuration
 // XXX test failure in initialize for FileLogger.Configuration
@@ -21,9 +22,9 @@ void main()
 {
    bool errorCond;
 
-   info("Print this message", " when info severity is enabled.");
-   error.when(errorCond)("Logs this error message when errorCond is true.");
-   fatal.format("Calling %s will exit the process", to!string(Level.fatal));
+   log!info("Print this message", " when info severity is enabled.");
+   log!error.when(errorCond)("Logs this error message when errorCond is true.");
+   log!fatal.format("Calling %s will exit the process", to!string(Level.fatal));
    vlog(1)("Verbose level 1 message");
 }
 ---
@@ -51,13 +52,13 @@ import std.log;
 
 void main(string[] args)
 {
-   info.format("You passed %s argument(s)", args.length - 1);
-   info.when(args.length > 1)("Arguments: ", args[1 .. $]);
+   log!info.format("You passed %s argument(s)", args.length - 1);
+   log!info.when(args.length > 1)("Arguments: ", args[1 .. $]);
 
-   info("This is an info message.");
-   warning("This is a warning message.");
-   error("This is an error message!");
-   dfatal("This is a debug fatal message");
+   log!info("This is an info message.");
+   log!warning("This is a warning message.");
+   log!error("This is an error message!");
+   log!dfatal("This is a debug fatal message");
 
    vlog(0)("Verbosity 0 message");
    vlog(1)("Verbosity 1 message");
@@ -65,26 +66,26 @@ void main(string[] args)
 
    foreach (i; 0 .. 10)
    {
-      info.when(every(9))("Every nine");
+      log!info.when(every(9))("Every nine");
 
-      if(info.willLog)
+      if(log!info.willLog)
       {
          auto message = "Cool message";
          // perform some complex operation
          // ...
-         info(message);
+         log!info(message);
       }
 
       vlog(2).when(first())("Verbose message only on the first iterations");
    }
 
-   try critical("Critical message");
+   try log!critical("Critical message");
    catch(CriticalException e)
    {
       // shutdown application...
    }
 
-   fatal("This is a fatal message!!!");
+   log!fatal("This is a fatal message!!!");
 }
 ---
 
@@ -118,6 +119,7 @@ import std.array : Appender, array;
 import std.format : formattedWrite;
 import std.path : fnmatch, join;
 import std.algorithm : endsWith, splitter;
+import std.functional : unaryFunImpl, binaryFunImpl;
 
 version(unittest)
 {
@@ -128,156 +130,152 @@ version(unittest)
    import std.stdio : writefln;
 }
 
-version(StdDdoc)
-{
-   /++
-      Fatal log messages terminate the application after the message is
-      persisted. Fatal log message cannot be disabled at compile time or at
-      run time.
+/++
+Fatal log messages terminate the application after the message is persisted.
+Fatal log message cannot be disabled at compile time or at run time.
 
-      Example:
-      ---
-fatal("A fatal message!");
-      ---
-    +/
-   LogFilter!(Severity.fatal) fatal;
+Example:
+---
+log!fatal("A fatal message!");
+---
++/
+alias Severity.fatal fatal;
 
-   /++
-      Debug fatal log messages log at fatal severity in debug mode and log at
-      critical severity in release mode. See fatal and critical severity
-      levels for a description of their behavior.
+/++
+Debug fatal log messages log at fatal severity in debug mode and log at
+critical severity in release mode. See fatal and critical severity levels for
+a description of their behavior.
 
-      Example:
-      ---
-dfatal("A fatal message in debug and an error message in release!");
-      ---
-    +/
-   LogFilter!(Severity.fatal) dfatal;
+Example:
+---
+log!dfatal("A fatal message in debug and an error message in release!");
+---
++/
+debug alias Severity.fatal dfatal;
+else alias Severity.critical dfatal;
 
-   /++
-      Critical log messages throw an exception after the message is persisted.
-      Critical log messages cannot be disabled at compile time or at run time.
+/++
+Critical log messages throw an exception after the message is persisted.
+Critical log messages cannot be disabled at compile time or at run time.
 
-      Example:
-      ---
-critical("A critical message!");
-      ---
-    +/
-   LogFilter!(Severity.critical) critical;
+Example:
+---
+log!critical("A critical message!");
+---
++/
+alias Severity.critical critical;
 
-   /++
-      Error log messages are disabled at compiled time by setting the version
-      to 'strip_log_error'. Error log messages are disabled at run time by
-      setting the minimun severity to $(D Level.fatal) or $(D Level.critical)
-      in $(D Configuration). Disabling _error log messages at compile time or
-      at run time also disables lower severity messages, e.g. warning and
-      info.
+/++
+Error log messages are disabled at compiled time by setting the version to
+'strip_log_error'. Error log messages are disabled at run time by setting the
+minimun severity to $(D Level.fatal) or $(D Level.critical) in
+$(D Configuration). Disabling _error log messages at compile time or at run
+time also disables lower severity messages, e.g. warning and info.
 
-      Example:
-      ---
-error("An error message!");
-      ---
-    +/
-   LogFilter!(Severity.error) error;
+Example:
+---
+log!error("An error message!");
+---
++/
+alias Severity.error error;
 
-   /++
-      Warning log messages are disabled at compiled time by setting the version
-      to 'strip_log_warning'. Warning log messages are disabled at run time by
-      setting the minimum severity to $(D Level.error) in $(D Configuration).
-      Disabling _warning log messages at compile time or at run time also
-      disables lower severity messages, e.g. info.
+/++
+Warning log messages are disabled at compiled time by setting the version to
+'strip_log_warning'. Warning log messages are disabled at run time by setting
+the minimum severity to $(D Level.error) in $(D Configuration).  Disabling
+_warning log messages at compile time or at run time also disables lower
+severity messages, e.g. info.
 
-      Example:
-      ---
-warning("A warning message!");
-      ---
-    +/
-   LogFilter!(Severity.warning) warning;
+Example:
+---
+log!warning("A warning message!");
+---
++/
+alias Severity.warning warning;
 
-   /++
-      Info log messages are disabled at compiled time by setting the version to
-      'strip_log_info'. Info log messages are disabled at run time by setting
-      the minimum severity to $(D Level.warning) in $(D Configuration).
-      Disabling _info log messages at compile time or at run time also disables
-      verbose log messages.
+/++
+Info log messages are disabled at compiled time by setting the version to
+'strip_log_info'. Info log messages are disabled at run time by setting the
+minimum severity to $(D Level.warning) in $(D Configuration).  Disabling _info
+log messages at compile time or at run time also disables verbose log messages.
 
-      Example:
-      ---
-info("An info message!");
-      ---
-    +/
-   LogFilter!(Severity.info) info;
+Example:
+---
+log!info("An info message!");
+---
++/
+alias Severity.info info;
 
-   /++
-      Verbose log messages are log at the info severity _level. To disable them
-      at compile time set the version to 'strip_log_info' which also disables
-      all messages of info severity at compile time. To enable verbose log
-      messages at run time use the the maximum verbose _level property and the
-      verbose filter property in $(D Configuration).
+/++
+Verbose log messages are log at the info severity _level. To disable them at
+compile time set the version to 'strip_log_info' which also disables all
+messages of info severity at compile time. To enable verbose log messages at
+run time use the the maximum verbose _level property and the verbose filter
+property in $(D Configuration).
 
-      Example:
-      ---
+Example:
+---
 vlog(1)("A verbose 1 message");
-      ---
-    +/
-   LogFilter!(Severity.info) vlog(short level, string file = __FILE__);
-}
-else
+---
+   +/
+auto vlog(string file = __FILE__)(int level)
 {
-   LogFilter!(Severity.fatal) fatal;
-   LogFilter!(Severity.critical) critical;
-
-   version(strip_log_error) NoopLogFilter error, warning, info;
+   static if(Severity.info > logImpl!(Severity.info).minSeverity)
+   {
+      return noopLogFilter;
+   }
    else
    {
-      LogFilter!(Severity.error) error;
-
-      version(strip_log_warning) NoopLogFilter warning, info;
-      else
-      {
-         LogFilter!(Severity.warning) warning;
-
-         version(strip_log_info) NoopLogFilter info;
-         else LogFilter!(Severity.info) info;
-      }
+      return _info.vlog(level, file);
    }
+}
 
-   debug alias fatal dfatal;
-   else alias critical dfatal;
+/++
+Maps to the $(D LogFilter) for the specified severity.
 
-   ref typeof(info) vlog(short level, string file = __FILE__)
+Example:
+---
+log!info("Info severity message");
+log!warning("Warning severity message");
+log!error("Error severity message");
+log!critical("Critical severity message");
+log!fatal("Fatal severity message");
+---
++/
+template log(Severity severity)
+{
+   alias logImpl!(severity).filter log;
+}
+
+template logImpl(Severity severity)
+{
+   version(strip_log_error) private alias Severity.critical minSeverity;
+   else version(strip_log_warning) private alias Severity.error minSeverity;
+   else version(strip_log_info) private alias Severity.warning minSeverity;
+   else private alias Severity.info minSeverity;
+
+   static if(severity > minSeverity) alias noopLogFilter filter;
+   else
    {
-      static if(is(typeof(return) == NoopLogFilter))
-      {
-         return info;
-      }
-      else
-      {
-         return info.vlog(level, file);
-      }
+      static if(severity == Severity.info) alias _info filter;
+      else static if(severity == Severity.warning) alias _warning filter;
+      else static if(severity == Severity.error) alias _error filter;
+      else static if(severity == Severity.critical) alias _critical filter;
+      else static if(severity == Severity.fatal) alias _fatal filter;
    }
 }
 
 unittest
 {
-   LogFilter!(Severity.info) logInfo;
-   LogFilter!(Severity.warning) logWarning;
-   LogFilter!(Severity.error) logError;
-   LogFilter!(Severity.critical) logCritical;
-   LogFilter!(Severity.fatal) logFatal;
-
    auto logger = new shared(TestLogger);
    auto testConfig = new Configuration(logger);
    testConfig.minSeverity = Severity.warning;
 
-   // logger shouldn't log if not init
-   assert(!logInfo.willLog);
-
-   logInfo.initialize(testConfig);
-   logWarning.initialize(testConfig);
-   logError.initialize(testConfig);
-   logCritical.initialize(testConfig);
-   logFatal.initialize(testConfig);
+   auto logInfo = new LogFilter(Severity.info, testConfig);
+   auto logWarning = new LogFilter(Severity.warning, testConfig);
+   auto logError = new LogFilter(Severity.error, testConfig);
+   auto logCritical = new LogFilter(Severity.critical, testConfig);
+   auto logFatal = new LogFilter(Severity.fatal, testConfig);
 
    auto loggedMessage = "logged message";
 
@@ -289,17 +287,17 @@ unittest
    assert(logFatal.willLog);
 
    // Test logging and severity filtering
-   logInfo(loggedMessage);
+   logInfo.write(loggedMessage);
    assert(!logger.called);
 
    logger.clear();
-   logWarning(loggedMessage);
+   logWarning.write(loggedMessage);
    assert(logger.called);
    assert(logger.severity == Severity.warning &&
           logger.message == loggedMessage);
 
    logger.clear();
-   logError(loggedMessage);
+   logError.write(loggedMessage);
    assert(logger.called);
    assert(logger.severity == Severity.error &&
           logger.message == loggedMessage);
@@ -311,14 +309,14 @@ unittest
           logger.message == loggedMessage);
 
    logger.clear();
-   assertThrown!CriticalException(logCritical(loggedMessage));
+   assertThrown!CriticalException(logCritical.write(loggedMessage));
    assert(logger.called);
    assert(logger.severity == Severity.critical &&
           logger.message == loggedMessage);
    assert(logger.flushCalled);
 
    logger.clear();
-   assertThrown!AssertError(logFatal(loggedMessage));
+   assertThrown!AssertError(logFatal.write(loggedMessage));
    assert(logger.called);
    assert(logger.severity == Severity.fatal &&
           logger.message == loggedMessage);
@@ -346,32 +344,37 @@ defined condition.
 
 Examples:
 ---
-error("Log an ", to!string(Level.error), " message!");
-error.write("Log an ", to!string(Level.error), " message!");
-error.format("Also logs an %s message!", to!string(Level.error));
+log!error("Log an ", to!string(Level.error), " message!");
+log!error.write("Log an ", to!string(Level.error), " message!");
+log!error.format("Also logs an %s message!", to!string(Level.error));
 ---
 Logs a message if the specified severity level is enabled.
 
 ---
 void coolFunction(Object object)
 {
-   fatal.when(object is null)("I don't like null objects!");
+   log!fatal.when(object is null)("I don't like null objects!");
    // ...
 }
 
 foreach(i; 0 .. 10)
 {
-   info.when(first())("Only log this the first time in the loop");
+   log!info.when(first())("Only log this the first time in the loop");
 }
 ---
 Logs a message if the specified severity level is enabled and all the user
 defined condition are true.
 +/
-struct LogFilter(Severity severity)
+final class LogFilter
 {
-   private void initialize(Configuration configuration)
+   this(Severity severity,
+        Configuration configuration,
+        bool privateBuffer = false)
    {
+      enforce(configuration);
+
       _config = configuration;
+      _privateBuffer = privateBuffer;
 
       _message.severity = severity;
       // XXX remove this when druntime is fixed.
@@ -381,24 +384,25 @@ struct LogFilter(Severity severity)
       }
    }
 
+   this() {}
+
    /++
       Returns true when a message can be logged.
 
       Example:
       ---
-if(error.willLog)
+if(log!error.willLog)
 {
    string message;
    // Perform some compuration
    // ...
-   error(message);
+   log!error(message);
 }
       ---
     +/
    @property bool willLog()
    {
-      return _config !is null &&
-             severity <= _config.minSeverity;
+      return _config !is null && _message.severity <= _config.minSeverity;
    }
 
    /++
@@ -410,14 +414,62 @@ if(error.willLog)
       ---
 foreach(i; 0 .. 10)
 {
-   warning.when(i == 9)("Executed loop when i = 9");
+   log!warning.when(i == 9)("Executed loop when i = 9");
    // ...
 }
       ---
     +/
-   ref LogFilter!severity when(lazy bool now)
+   LogFilter when(lazy bool now)
    {
       if(willLog && now) return this;
+
+      return _noopLogFilter;
+   }
+
+   unittest
+   {
+      auto logger = new shared(TestLogger);
+      auto testConfig = new Configuration(logger);
+
+      auto logError = new LogFilter(Severity.error, testConfig);
+
+      auto loggedMessage = "logged message";
+
+      assert(logError.when(richIsNull(null)).when(richEqual(0, 0)).willLog);
+   }
+
+   /++
+      Returns this object if the parameter $(D now) evaluates to true and if a
+      message can be logged. It also appends the log message with a reason why
+      it is true. Note: The $(D now) parameter is only evaluated if a message
+      can be logged with this object.
+
+      Example:
+      ---
+foreach(i; 0 .. 10)
+{
+   log!warning.when(richEqual(i, 9))("Executed loop when i = 9");
+   // ...
+}
+      ---
+    +/
+   LogFilter when(lazy Rich!bool now)
+   {
+      if(willLog && now.value)
+      {
+         auto filter = this;
+         if(!_privateBuffer)
+         {
+            filter = new LogFilter(_message.severity, _config, true);
+         }
+         else filter.writer.put("&& ");
+
+         filter.writer.put("when(");
+         filter.writer.put(now.reason);
+         filter.writer.put(") ");
+
+         return filter;
+      }
 
       return _noopLogFilter;
    }
@@ -430,10 +482,10 @@ foreach(i; 0 .. 10)
       ---
 auto pi = 3.14159265;
 
-info.write("The value of pi is ", pi);
+log!info.write("The value of pi is ", pi);
 
 // The same as above...
-info("The value of pi is ", pi);
+log!info("The value of pi is ", pi);
       ---
     +/
    void write(string file = __FILE__, int line = __LINE__, T...)(lazy T args)
@@ -441,10 +493,21 @@ info("The value of pi is ", pi);
       // XXX change this to use formattedWrite's new format string
       if(willLog)
       {
-         /// XXX move this to format when I start using the new formattedWrite
+         scope(exit) handleSeverity();
+
+         // XXX move this to format when I start using the new formattedWrite
          _message.file = file;
          _message.line = line;
-         log(_message, args);
+
+         // record message
+         scope(exit) writer.clear();
+         foreach(T, arg; args) writer.put(to!(char[])(arg));
+         _message.message = writer.data;
+
+         // record the time stamp
+         _message.time = Clock.currTime(UTC());
+
+         _config.logger.log(_message);
       }
    }
    alias write opCall; /// ditto
@@ -467,90 +530,46 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
    {
       if(willLog)
       {
+         scope(exit) handleSeverity();
+
          _message.file = file;
          _message.line = line;
-         logf(_message, fmt, args);
+
+         // record message
+         scope(exit) writer.clear();
+         writer.reserve(fmt.length);
+         formattedWrite(writer, fmt, args);
+         _message.message = writer.data;
+
+         // record the time stamp
+         _message.time = Clock.currTime(UTC());
+
+         _config.logger.log(_message);
       }
    }
 
-   private void log(T...)(ref Logger.LogMessage message, T args)
+   private void handleSeverity()
    {
-      assert(willLog);
-
-      // record message
-      _writer.clear();
-      foreach(T, arg; args) _writer.put(to!(char[])(arg));
-      message.message = _writer.data;
-
-      // record the time stamp
-      message.time = Clock.currTime(UTC());
-
-      static if(severity == Severity.fatal)
+      if(_message.severity == Severity.fatal)
       {
          /+
           + The other of the scope(exit) is important. We want
           + _fatalHandler to run before the assert.
           +/
-         scope(exit)
-         {
-            scope(exit) assert(false);
-            scope(exit) _config.fatalHandler();
-            _config.logger.flush();
-         }
+         scope(exit) assert(false);
+         scope(exit) _config.fatalHandler();
+         _config.logger.flush();
       }
-      else static if(severity == Severity.critical)
+      else if(_message.severity == Severity.critical)
       {
-         scope(exit)
-         {
-            _config.logger.flush();
-            throw new CriticalException(message.message.idup);
-         }
+         _config.logger.flush();
+         throw new CriticalException(_message.message.idup);
       }
-
-      _config.logger.log(message);
-   }
-
-   private void logf(T...)(ref Logger.LogMessage message, string fmt, T args)
-   {
-      assert(willLog);
-
-      // record message
-      _writer.clear();
-      _writer.reserve(fmt.length);
-      formattedWrite(_writer, fmt, args);
-      message.message = _writer.data;
-
-      // record the time stamp
-      message.time = Clock.currTime(UTC());
-
-      scope(exit)
-      {
-         if(message.severity == Severity.fatal)
-         {
-            /+
-             + The other of the scope(exit) is important. We want
-             + _fatalHandler to run before the assert.
-             +/
-            scope(exit) assert(false);
-            scope(exit) _config.fatalHandler();
-            _config.logger.flush();
-         }
-         else if(message.severity == Severity.critical)
-         {
-            _config.logger.flush();
-            throw new CriticalException(message.message.idup);
-         }
-      }
-
-      _config.logger.log(message);
    }
 
    unittest
    {
       auto loggedMessage = "Verbose log message";
-
-      LogFilter!(Severity.info) logInfo;
-      LogFilter!(Severity.warning) logWarning;
 
       auto logger = new shared(TestLogger);
       auto testConfig = new Configuration(logger);
@@ -558,14 +577,14 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
       testConfig.maxVerboseLevel = 3;
       testConfig.verboseFilter = "*log.d=2";
 
-      logInfo.initialize(testConfig);
-      logWarning.initialize(testConfig);
+      auto logInfo = new LogFilter(Severity.info, testConfig);
+      auto logWarning = new LogFilter(Severity.warning, testConfig);
 
       // Test vlogging and module filtering
       logger.clear();
       auto verboseLog = logWarning.vlog(2);
       assert(verboseLog.willLog);
-      verboseLog(loggedMessage);
+      verboseLog.write(loggedMessage);
       assert(logger.called);
       assert(logger.severity == Severity.warning &&
             logger.message == loggedMessage);
@@ -580,7 +599,7 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
       // test large verbose level
       logger.clear();
       verboseLog = logWarning.vlog(3);
-      verboseLog(loggedMessage);
+      verboseLog.write(loggedMessage);
       assert(!logger.called);
 
       // test wrong module
@@ -605,7 +624,7 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
       assert(!logger.called);
    }
 
-   private ref typeof(this) vlog(short level, string file = __FILE__)
+   LogFilter vlog(int level, string file = __FILE__)
    {
       if(willLog && _config.matchesVerboseFilter(file, level))
       {
@@ -615,10 +634,18 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
       return _noopLogFilter;
    }
 
+   private ref Appender!(char[]) writer()
+   {
+      if(_privateBuffer) return _privateWriter;
+      else return _threadWriter;
+   }
+
    private Logger.LogMessage _message;
    private Configuration _config;
+   private bool _privateBuffer;
+   private Appender!(char[]) _privateWriter;
 
-   private static Appender!(char[]) _writer;
+   private static Appender!(char[]) _threadWriter;
 
    private static __gshared LogFilter _noopLogFilter;
 }
@@ -644,26 +671,28 @@ unittest
       filter.write("hello ", 1, " world");
       filter(1, " hello world");
       filter.format("format string", true, 4, 5.0);
-      filter.when(true)("message");
+      filter.when(true).write("message");
+      filter.when(richIsNull(null)).write("better message");
+      filter.vlog(0, "file");
+      filter.vlog(0);
    }
 
-   assert(__traits(compiles, publicInterface!(LogFilter!(Severity.fatal))));
-   assert(__traits(compiles, publicInterface!(LogFilter!(Severity.critical))));
-   assert(__traits(compiles, publicInterface!(LogFilter!(Severity.error))));
-   assert(__traits(compiles, publicInterface!(LogFilter!(Severity.warning))));
-   assert(__traits(compiles, publicInterface!(LogFilter!(Severity.info))));
+   assert(__traits(compiles, publicInterface!LogFilter));
    assert(__traits(compiles, publicInterface!NoopLogFilter));
 }
 
 // Used by the module to disable logging at compile time.
-struct NoopLogFilter
+final class NoopLogFilter
 {
    @property bool willLog() const { return false; }
 
    ref NoopLogFilter when(lazy bool now) { return this; }
+   ref NoopLogFilter when(lazy Rich!bool now) { return this; }
    void write(T...)(lazy T args) {}
    alias write opCall;
    void format(T...)(lazy string fmt, lazy T args) {}
+
+   ref NoopLogFilter vlog(int level, string file = __FILE__) { return this; }
 }
 
 /// Defines the severity levels supported by the logging library.
@@ -894,9 +923,9 @@ final class Configuration
       the verbose message matches a module specified in the verbose
       configuration for modules property.
 
-      The default value is $(D short.min).
+      The default value is $(D int.min).
     +/
-   @property short maxVerboseLevel(short level)
+   @property int maxVerboseLevel(int level)
    {
       enforce(_rwmutex.writer.tryLock);
       scope(exit) _rwmutex.writer.unlock;
@@ -905,7 +934,7 @@ final class Configuration
       return _level;
    }
    /// ditto
-   @property short maxVerboseLevel()
+   @property int maxVerboseLevel()
    {
       synchronized(_rwmutex.reader) return _level;
    }
@@ -1022,7 +1051,7 @@ vlog(2)("Verbose message is not logged");
          }
 
          patterns ~= [ entryParts[0], altName ];
-         levels ~= to!short(entryParts[1]);
+         levels ~= to!int(entryParts[1]);
       }
       assert(patterns.length == levels.length);
 
@@ -1078,7 +1107,7 @@ class NullLogger : Logger
 
 void main(string[] args)
 {
-   configuration.logger = new NullLogger();
+   config.logger = new NullLogger();
    // ...
 }
       ---
@@ -1122,7 +1151,7 @@ void main(string[] args)
       synchronized(_rwmutex.reader) return _fatalHandler;
    }
 
-   private bool matchesVerboseFilter(string file, short level)
+   private bool matchesVerboseFilter(string file, int level)
    {
       synchronized(_rwmutex.reader)
       {
@@ -1151,9 +1180,9 @@ void main(string[] args)
    private void function() _fatalHandler;
 
    // verbose filtering variables
-   private short _level = short.min;
+   private int _level = int.min;
    private string[2][] _modulePatterns;
-   private short[] _moduleLevels;
+   private int[] _moduleLevels;
    private string _vmodule;
 
    // backend logger variables
@@ -1285,8 +1314,7 @@ severity are written to all the log files of an equal or lower severity. E.g.
 A log message of severity warning will be written to the log files for warning
 and info but not to the log files of fatal and error.
 +/
-class FileLogger(Writer) : Logger
-// XXX write test for Writer
+class FileLogger(Writer) if(isWriter!Writer) : Logger
 {
    unittest
    {
@@ -1502,7 +1530,7 @@ class FileLogger(Writer) : Logger
 
       This constructor is required by $(D initializeLogging).
     +/
-   private this(Configuration loggerConfig)
+   this(Configuration loggerConfig)
    {
       enforce(loggerConfig.name);
 
@@ -1510,11 +1538,11 @@ class FileLogger(Writer) : Logger
       _mutex = new Mutex;
 
       // Create file for every severity; add one more for stderr
-      _writers = new Writer[numberOfLogFilters + 1];
+      _writers = new Writer[Severity.max + 2];
       _writers[$ - 1] = stderr; // add stderr
 
       // create the indices for all the loggers
-      _indices = new size_t[][numberOfLogFilters];
+      _indices = new size_t[][Severity.max + 1];
       foreach(i, ref index; _indices)
       {
          if(loggerConfig.logToStderr)
@@ -1552,16 +1580,6 @@ class FileLogger(Writer) : Logger
       }
    }
 
-   private static int numberOfLogFilters() pure nothrow
-   {
-      static if(is(typeof(fatal) == NoopLogFilter)) return 0;
-      else static if(is(typeof(critical) == NoopLogFilter)) return  1;
-      else static if(is(typeof(error) == NoopLogFilter)) return  2;
-      else static if(is(typeof(warning) == NoopLogFilter)) return 3;
-      else static if(is(typeof(info) == NoopLogFilter)) return 4;
-      else return 5;
-   }
-
    /// Writes a _log message to all the _log files of equal or lower severity.
    shared void log(const ref LogMessage message)
    {
@@ -1575,12 +1593,12 @@ class FileLogger(Writer) : Logger
                _writers[i].open(_filenames[i], "w");
                _writers[i].setvbuf(_bufferSize);
             }
-            _writers[i].writef("%s:%s:%s:%x:%s %s%s",
+            _writers[i].writef("%s:%x %s:%s %s %s%s",
+                               message.time.toISOString(),
+                               message.threadId,
                                message.file,
                                message.line,
                                toupper(to!string(message.severity)),
-                               message.threadId,
-                               message.time.toISOString(),
                                message.message,
                                newline);
          }
@@ -1600,7 +1618,6 @@ class FileLogger(Writer) : Logger
    }
 
    private size_t _bufferSize;
-   private bool _initialized;
 
    private Mutex _mutex; // rwmutex wont preserve the order
    private string[] _filenames;
@@ -1608,11 +1625,28 @@ class FileLogger(Writer) : Logger
    __gshared Writer[] _writers;
 }
 
+unittest
+{
+   assert(isWriter!File);
+}
+
+private template isWriter(Writer)
+{
+   enum bool isWriter =
+      __traits(compiles, { Writer w;
+                           if(!w.isOpen) w.open("name", "w");
+                           w.setvbuf(1024);
+                           w.writef("format", 1, true, "", 3.4);
+                           w.flush();
+                           w = stderr; });
+}
+
 /++
 Extension point for the module.
 +/
 interface Logger
 {
+
 /++
 Logs a _message.
 
@@ -1856,29 +1890,106 @@ bool after(string file = __FILE__, int line = __LINE__)(Duration n)
    return false;
 }
 
+struct Rich(Type)
+{
+   @property const Type value() { return _value; }
+   @property const string reason() { return to!string(_reason); }
+
+   const string toString() { return reason; }
+
+   const Type opCast(Type)() { return value; }
+   const bool opEquals(ref const Rich!Type rhs) { return value == rhs.value; }
+   const int opCmp(ref const Rich!Type rhs)
+   {
+      if(value < rhs.value) return -1;
+      else if(value > rhs.value) return 1;
+      return 0;
+   }
+
+   private Type _value;
+   private string _reason;
+}
+
+template richBinaryFun(string exp,
+                       string paramNameA = "a",
+                       string paramNameB = "b")
+{
+   Rich!(binaryFunImpl!(exp, paramNameA, paramNameB).Body!(T, R).ReturnType)
+      richBinaryFun(T, R)(T a, R b)
+      if(__traits(compiles, { T a; to!string(a); }) &&
+         __traits(compiles, { R b; to!string(b); }))
+   {
+      auto value = binaryFunImpl!(exp, paramNameA, paramNameB).result(a, b);
+      auto reason = to!string(value) ~ " = (" ~ exp ~ ") <" ~
+                    paramNameA ~ " = '" ~ to!string(a) ~ "', " ~
+                    paramNameB ~ " = '" ~ to!string(b) ~ "'>";
+
+      typeof(return) result = { value, reason };
+      return result;
+   }
+}
+
+template richUnaryFun(string exp, string paramName = "a")
+{
+   Rich!(unaryFunImpl!(exp, false, paramName).Body!(T).ReturnType)
+      richUnaryFun(T)(T a)
+      if(__traits(compiles, { T a; to!string(a); }))
+   {
+      auto value = unaryFunImpl!(exp, false, paramName).result(a);
+      auto reason = to!string(value) ~ " = (" ~ exp ~ ") <" ~
+           paramName ~ " = '" ~ to!string(a) ~ "'>";
+
+      typeof(return) result = { value, reason };
+      return result;
+   }
+}
+
+/++
+Rich comparison operator.
+
+Example:
+---
+Object obj;
+
+writefln("%s", richIsNull(obj));
+writefln("%s", richEqual(10, 20));
+writefln("%s", richGreater(10, 20));
+writefln("%s", richLess(10, 20));
+---
++/
+alias richBinaryFun!"a == b" richEqual;
+alias richBinaryFun!"a > b" richGreater; /// ditto
+alias richBinaryFun!"a < b" richLess; /// ditto
+alias richUnaryFun!"a is null" richIsNull; /// ditto
+
+/++
+Rich logical boolean operators.
+
+Example:
+---
+Object obj;
+
+writefln("%s", richAnd(richEqual(10, 20), richIsNull(obj)));
+writefln("%s", richOr(richEqual(10, 20), richIsNull(obj)));
+---
++/
+alias richBinaryFun!"a && b" richAnd;
+alias richBinaryFun!"a || b" richOr; /// ditto
+
 static this()
 {
-   fatal.initialize(config);
-   critical.initialize(config);
-
-   static if(is(typeof(error) == LogFilter!(Severity.error)))
-   {
-      error.initialize(config);
-   }
-
-   static if(is(typeof(warning) == LogFilter!(Severity.warning)))
-   {
-      warning.initialize(config);
-   }
-
-   static if(is(typeof(info) == LogFilter!(Severity.info)))
-   {
-      info.initialize(config);
-   }
+   _fatal = new LogFilter(Severity.fatal, config);
+   _critical = new LogFilter(Severity.critical, config);
+   _error = new LogFilter(Severity.error, config);
+   _warning = new LogFilter(Severity.warning, config);
+   _info = new LogFilter(Severity.info, config);
 }
 
 shared static this()
 {
+   LogFilter._noopLogFilter = new LogFilter;
+   noopLogFilter = new NoopLogFilter;
+
    auto args = Runtime.args;
 
    auto loggerConfig = FileLogger!(File).Configuration.create();
@@ -1893,7 +2004,14 @@ shared static this()
    catch(Exception e) { /+ ignore any error +/ }
 }
 
+private LogFilter _fatal;
+private LogFilter _critical;
+private LogFilter _error;
+private LogFilter _warning;
+private LogFilter _info;
+
 __gshared Configuration config;
+__gshared NoopLogFilter noopLogFilter;
 
 version(unittest)
 {
