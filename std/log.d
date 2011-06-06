@@ -1,6 +1,4 @@
 // Written in the D programming language.
-// XXX add support for rich booleans in when()
-// XXX write unittest for Rich!T
 // XXX rename LogFilter
 // XXX test changing Flag in parseCommandLine for FileLogger.Configuration
 // XXX test failure in parseCommandLine for FileLogger.Configuration
@@ -434,7 +432,7 @@ foreach(i; 0 .. 10)
 
       auto loggedMessage = "logged message";
 
-      assert(logError.when(richIsNull(null)).when(richEqual(0, 0)).willLog);
+      assert(logError.when(rich!"<="(1, 2)).when(rich!"=="(0, 0)).willLog);
    }
 
    /++
@@ -671,7 +669,7 @@ unittest
       filter(1, " hello world");
       filter.format("format string", true, 4, 5.0);
       filter.when(true).write("message");
-      filter.when(richIsNull(null)).write("better message");
+      filter.when(rich!"=="(0, 0)).write("better message");
       filter.vlog(0, "file");
       filter.vlog(0);
    }
@@ -1888,6 +1886,7 @@ bool after(string file = __FILE__, int line = __LINE__)(Duration n)
 }
 
 struct Rich(Type)
+   if(is(Type == bool))
 {
    @property const Type value() { return _value; }
    @property const string reason() { return to!string(_reason); }
@@ -1895,11 +1894,15 @@ struct Rich(Type)
    const string toString() { return reason; }
 
    const Type opCast(Type)() { return value; }
-   const bool opEquals(ref const Rich!Type rhs) { return value == rhs.value; }
-   const int opCmp(ref const Rich!Type rhs)
+
+   const bool opEquals(Type rhs) { return value == rhs; }
+   const bool opEquals(ref const Rich!Type rhs) { return opEquals(rhs.value); }
+
+   const int opCmp(ref const Rich!Type rhs) { return opCmp(rhs.value); }
+   const int opCmp(Type rhs)
    {
-      if(value < rhs.value) return -1;
-      else if(value > rhs.value) return 1;
+      if(value < rhs) return -1;
+      else if(value > rhs) return 1;
       return 0;
    }
 
@@ -1907,71 +1910,77 @@ struct Rich(Type)
    private string _reason;
 }
 
-template richBinaryFun(string exp,
-                       string paramNameA = "a",
-                       string paramNameB = "b")
+private bool isBinaryOp(string op)
 {
-   Rich!(binaryFunImpl!(exp, paramNameA, paramNameB).Body!(T, R).ReturnType)
-      richBinaryFun(T, R)(T a, R b)
+   switch(op)
+   {
+      case "==":
+      case "!=":
+      case ">":
+      case ">=":
+      case "<":
+      case "<=":
+      case "&&":
+      case "||":
+         return true;
+      default:
+         return false;
+   }
+}
+
+unittest
+{
+   assert(rich!"=="(1, 1));
+   assert(rich!"!="(1, 2));
+   assert(rich!">"(2, 1));
+   assert(rich!">="(2, 2) && rich!">="(2, 1));
+   assert(rich!"<"(1, 2));
+   assert(rich!"<="(1, 2) && rich!"<="(1, 1));
+   assert(rich!"&&"(rich!"=="(1, 1), rich!"!="(1, 2)));
+   assert(rich!"||"(rich!"<"(1, 1), rich!"=="(1, 1)));
+
+   assert(!rich!"=="(1, 2));
+   assert(!rich!"!="(1, 1));
+   assert(!rich!">"(1, 1));
+   assert(!rich!">="(1, 2));
+   assert(!rich!"<"(2, 2));
+   assert(!rich!"<="(3, 2));
+   assert(!rich!"&&"(rich!"=="(1, 1), rich!"!="(1, 1)));
+   assert(!rich!"||"(rich!"<="(1, 0), rich!"=="(1, 0)));
+}
+
+template rich(string exp)
+   if(isBinaryOp(exp))
+{
+   Rich!(binaryFunImpl!("a" ~ exp ~ "b", "a", "b").Body!(T, R).ReturnType)
+      rich(T, R)(T a, R b)
       if(__traits(compiles, { T a; to!string(a); }) &&
          __traits(compiles, { R b; to!string(b); }))
    {
-      auto value = binaryFunImpl!(exp, paramNameA, paramNameB).result(a, b);
-      auto reason = to!string(value) ~ " = (" ~ exp ~ ") <" ~
-                    paramNameA ~ " = '" ~ to!string(a) ~ "', " ~
-                    paramNameB ~ " = '" ~ to!string(b) ~ "'>";
+      auto value = binaryFunImpl!("a" ~ exp ~ "b", "a", "b").result(a, b);
+      auto reason = to!string(value) ~ " = (" ~
+                    to!string(a) ~ " " ~
+                    exp ~ " " ~
+                    to!string(b) ~ ")";
 
       typeof(return) result = { value, reason };
       return result;
    }
 }
 
-template richUnaryFun(string exp, string paramName = "a")
+template rich(string exp)
+   if(exp == "!")
 {
-   Rich!(unaryFunImpl!(exp, false, paramName).Body!(T).ReturnType)
-      richUnaryFun(T)(T a)
-      if(__traits(compiles, { T a; to!string(a); }))
+   Rich!bool rich(T)(T a)
+      if(__traits(compiles, { T a; bool b = !a; to!string(a); }))
    {
-      auto value = unaryFunImpl!(exp, false, paramName).result(a);
-      auto reason = to!string(value) ~ " = (" ~ exp ~ ") <" ~
-           paramName ~ " = '" ~ to!string(a) ~ "'>";
+      auto value = !a;
+      auto reason = to!string(value) ~ " = (!" ~ to!string(a) ~ ")";
 
       typeof(return) result = { value, reason };
       return result;
    }
 }
-
-/++
-Rich comparison operator.
-
-Example:
----
-Object obj;
-
-writefln("%s", richIsNull(obj));
-writefln("%s", richEqual(10, 20));
-writefln("%s", richGreater(10, 20));
-writefln("%s", richLess(10, 20));
----
-+/
-alias richBinaryFun!"a == b" richEqual;
-alias richBinaryFun!"a > b" richGreater; /// ditto
-alias richBinaryFun!"a < b" richLess; /// ditto
-alias richUnaryFun!"a is null" richIsNull; /// ditto
-
-/++
-Rich logical boolean operators.
-
-Example:
----
-Object obj;
-
-writefln("%s", richAnd(richEqual(10, 20), richIsNull(obj)));
-writefln("%s", richOr(richEqual(10, 20), richIsNull(obj)));
----
-+/
-alias richBinaryFun!"a && b" richAnd;
-alias richBinaryFun!"a || b" richOr; /// ditto
 
 static this()
 {
