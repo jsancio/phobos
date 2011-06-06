@@ -2,8 +2,8 @@
 // XXX add support for rich booleans in when()
 // XXX write unittest for Rich!T
 // XXX rename LogFilter
-// XXX test changing Flag in initialize for FileLogger.Configuration
-// XXX test failure in initialize for FileLogger.Configuration
+// XXX test changing Flag in parseCommandLine for FileLogger.Configuration
+// XXX test failure in parseCommandLine for FileLogger.Configuration
 // XXX check all template parameters
 // XXX make sure that the examples are correct.
 // XXX rename dfatal and vlog to debugFatal and verbose.
@@ -127,7 +127,6 @@ version(unittest)
    import core.time : dur;
    import std.exception : assertThrown;
    import std.algorithm : startsWith;
-   import std.stdio : writefln;
 }
 
 /++
@@ -721,7 +720,7 @@ unittest
                 "3",
                 "--ignoredOption"];
 
-   testConfig.initialize(args);
+   testConfig.parseCommandLine(args);
 
    // assert that all expected options where removed
    assert(args.length == 2);
@@ -758,7 +757,7 @@ unittest
            "--" ~ defaultFilterFlag,
            "--" ~ defaultLevelFlag];
 
-   testConfig.initialize(args);
+   testConfig.parseCommandLine(args);
 
    // assert that all expected options where removed
    assert(args.length == 4);
@@ -778,7 +777,7 @@ unittest
    Configuration.verboseFilterFlag = defaultFilterFlag;
    Configuration.maxVerboseLevelFlag = defaultLevelFlag;
 
-   // === test that an error in initialize doesn't invalidate object
+   // === test that an error in parseCommandLine doesn't invalidate object
    args = [name,
            "--" ~ Configuration.minSeverityFlag,
            "info",
@@ -793,7 +792,7 @@ unittest
    testConfig.verboseFilter = "log=2";
    testConfig.maxVerboseLevel = 1;
 
-   assertThrown(testConfig.initialize(args));
+   assertThrown(testConfig.parseCommandLine(args));
 
    // test that nothing changed
    assert(testConfig.minSeverity == Severity.error);
@@ -832,7 +831,7 @@ final class Configuration
       A call to the function is not required if the module will be initialized
       using the command line's default options.
     +/
-   void initialize(ref string[] commandLine)
+   void parseCommandLine(ref string[] commandLine)
    {
       auto severity = minSeverity;
       auto level = maxVerboseLevel;
@@ -1334,7 +1333,7 @@ class FileLogger(Writer) if(isWriter!Writer) : Logger
                    "--" ~ Configuration.logDirectoryFlag, "/tmp",
                    "--ignoredOption"];
 
-      loggerConfig.initialize(args);
+      loggerConfig.parseCommandLine(args);
       assert(args.length == 2);
       assert(args[0] == name);
 
@@ -1348,7 +1347,7 @@ class FileLogger(Writer) if(isWriter!Writer) : Logger
       args = [name, "--" ~ Configuration.alsoLogToStderrFlag];
 
       loggerConfig = Configuration.create();
-      loggerConfig.initialize(args);
+      loggerConfig.parseCommandLine(args);
       assert(loggerConfig.alsoLogToStderr);
    }
 
@@ -1380,7 +1379,7 @@ class FileLogger(Writer) if(isWriter!Writer) : Logger
          The $(D name) property is set to the program name, i.e. the first
          element of commandLine.
        +/
-      void initialize(ref string[] commandLine)
+      void parseCommandLine(ref string[] commandLine)
       {
          enforce(commandLine.length > 0);
 
@@ -1527,8 +1526,6 @@ class FileLogger(Writer) if(isWriter!Writer) : Logger
 
    /++
       Constructs a logger with the configuration specified in loggerConfig.
-
-      This constructor is required by $(D initializeLogging).
     +/
    this(Configuration loggerConfig)
    {
@@ -1994,13 +1991,13 @@ shared static this()
 
    auto loggerConfig = FileLogger!(File).Configuration.create();
 
-   try loggerConfig.initialize(args);
+   try loggerConfig.parseCommandLine(args);
    catch(Exception e) { /+ ignore any error +/ }
 
    auto logger = new FileLogger!File(loggerConfig);
    config = new Configuration(logger);
 
-   try config.initialize(args);
+   try config.parseCommandLine(args);
    catch(Exception e) { /+ ignore any error +/ }
 }
 
