@@ -8,7 +8,6 @@
 
 // TODO remove the use of text!
 // TODO Allow the configuration of the log file name
-// TODO Allow the configuration of the log line
 
 /++
 Implements an application level logging mechanism.
@@ -106,18 +105,22 @@ import core.sync.mutex : Mutex;
 import core.sync.rwmutex : ReadWriteMutex;
 import core.runtime : Runtime;
 import core.time : Duration;
-import std.stdio : File, stderr;
-import std.string : newline, toupper;
+import std.stdio; //: File, stderr;
+import std.string : newline, toupper, capitalize, toStringz;
 import std.conv : text, to;
-import std.datetime: Clock, SysTime, UTC, FracSec;
+import std.datetime: Clock, SysTime, UTC, FracSec, DateTime;
 import std.exception : enforce;
 import std.getopt : getopt;
 import std.process : getenv;
 import std.array : Appender, array;
 import std.format : formattedWrite;
-import std.path : fnmatch, join;
+import std.path : fnmatch, join, basename;
 import std.algorithm : endsWith, splitter;
 import std.functional : unaryFunImpl, binaryFunImpl;
+import std.socket : Socket;
+import std.file : exists, isSymLink, remove;
+
+version(Posix) import core.sys.posix.unistd : symlink;
 
 version(unittest)
 {
@@ -219,7 +222,7 @@ auto vlog(string file = __FILE__)(int level)
 {
    static if(Severity.info > logImpl!(Severity.info).minSeverity)
    {
-      return noopLogFilter;
+      return _noopLogFilter;
    }
    else
    {
@@ -251,7 +254,7 @@ template logImpl(Severity severity)
    else version(strip_log_info) private alias Severity.warning minSeverity;
    else private alias Severity.info minSeverity;
 
-   static if(severity > minSeverity) alias noopLogFilter filter;
+   static if(severity > minSeverity) alias _noopLogFilter filter;
    else
    {
       static if(severity == Severity.info) alias _info filter;
@@ -1195,7 +1198,7 @@ unittest
    auto message = Logger.LogMessage.init;
    message.time = Clock.currTime;
 
-   auto loggerConfig = FileLogger!(TestWriter).Configuration.create();
+   auto loggerConfig = FileLogger.Configuration.create();
    loggerConfig.name = "test";
 
 
@@ -1203,11 +1206,11 @@ unittest
    TestWriter.clear();
    passed = 0;
    message.severity = Severity.info;
-   auto logger = new shared(FileLogger!TestWriter)(loggerConfig);
+   auto logger = new shared(FileLogger)(loggerConfig);
    logger.log(message);
    foreach(ref key, ref data; TestWriter.writers)
    {
-      if(startsWith(key, "test.log.INFO") && data.lines.length == 1)
+      if(startsWith(key, "test.log.INFO") && data.lines.length == 2)
          ++passed;
       else assert(data.lines.length == 0);
    }
@@ -1217,12 +1220,12 @@ unittest
    TestWriter.clear();
    passed = 0;
    message.severity = Severity.warning;
-   logger = new shared(FileLogger!TestWriter)(loggerConfig);
+   logger = new shared(FileLogger)(loggerConfig);
    logger.log(message);
    foreach(ref key, ref data; TestWriter.writers)
    {
-      if(startsWith(key, "test.log.INFO") && data.lines.length == 1 ||
-         startsWith(key, "test.log.WARNING") && data.lines.length == 1)
+      if(startsWith(key, "test.log.INFO") && data.lines.length == 2 ||
+         startsWith(key, "test.log.WARNING") && data.lines.length == 2)
          ++passed;
       else assert(data.lines.length == 0);
    }
@@ -1235,7 +1238,7 @@ unittest
 
    loggerConfig.logToStderr = true;
    loggerConfig.stderrThreshold = Severity.error;
-   logger = new shared(FileLogger!TestWriter)(loggerConfig);
+   logger = new shared(FileLogger)(loggerConfig);
    logger.log(message);
    foreach(ref key, ref data; TestWriter.writers)
    {
@@ -1253,13 +1256,13 @@ unittest
    loggerConfig.logToStderr = false;
    loggerConfig.alsoLogToStderr = true;
    loggerConfig.stderrThreshold = Severity.error;
-   logger = new shared(FileLogger!TestWriter)(loggerConfig);
+   logger = new shared(FileLogger)(loggerConfig);
    logger.log(message);
    foreach(ref key, ref data; TestWriter.writers)
    {
-      if(startsWith(key, "test.log.INFO") && data.lines.length == 1 ||
-         startsWith(key, "test.log.WARNING") && data.lines.length == 1 ||
-         startsWith(key, "test.log.ERROR") && data.lines.length == 1 ||
+      if(startsWith(key, "test.log.INFO") && data.lines.length == 2 ||
+         startsWith(key, "test.log.WARNING") && data.lines.length == 2 ||
+         startsWith(key, "test.log.ERROR") && data.lines.length == 2 ||
          key == "stderr file" && data.lines.length == 1)
          ++passed;
       else assert(data.lines.length == 0);
@@ -1274,11 +1277,11 @@ unittest
    loggerConfig.logToStderr = false;
    loggerConfig.alsoLogToStderr = false;
    loggerConfig.logDirectory = "/dir";
-   logger = new shared(FileLogger!TestWriter)(loggerConfig);
+   logger = new shared(FileLogger)(loggerConfig);
    logger.log(message);
    foreach(ref key, ref data; TestWriter.writers)
    {
-      if(startsWith(key, "/dir/test.log.INFO") && data.lines.length == 1)
+      if(startsWith(key, "/dir/test.log.INFO") && data.lines.length == 2)
          ++passed;
       else assert(data.lines.length == 0);
    }
@@ -1293,7 +1296,7 @@ unittest
    loggerConfig.alsoLogToStderr = false;
    loggerConfig.logDirectory = "";
    loggerConfig.bufferSize = 32;
-   logger = new shared(FileLogger!TestWriter)(loggerConfig);
+   logger = new shared(FileLogger)(loggerConfig);
    logger.log(message);
    foreach(ref key, ref data; TestWriter.writers)
    {
@@ -1311,7 +1314,7 @@ severity are written to all the log files of an equal or lower severity. E.g.
 A log message of severity warning will be written to the log files for warning
 and info but not to the log files of fatal and error.
 +/
-class FileLogger(Writer) if(isWriter!Writer) : Logger
+class FileLogger : Logger
 {
    unittest
    {
@@ -1514,12 +1517,305 @@ class FileLogger(Writer) if(isWriter!Writer) : Logger
       }
       @property const size_t bufferSize() { return _bufferSize; } /// ditto
 
+      unittest
+      {
+         auto testConfig = Configuration.create();
+         assert((testConfig.logLineFormat = "%%") == "%%");
+         assert((testConfig.logLineFormat = "%t") == "%t");
+         assert((testConfig.logLineFormat = "%i") == "%i");
+         assert((testConfig.logLineFormat = "%f") == "%f");
+         assert((testConfig.logLineFormat = "%l") == "%l");
+         assert((testConfig.logLineFormat = "%s") == "%s");
+         assert((testConfig.logLineFormat = "%m") == "%m");
+         assert((testConfig.logLineFormat = "%t%i%f%l%s%m") == "%t%i%f%l%s%m");
+
+         assertThrown(testConfig.logLineFormat = "% ");
+         assertThrown(testConfig.logLineFormat = "%k");
+
+         assert((testConfig.logLineFormat = "string without percent") ==
+                "string without percent");
+         assert((testConfig.logLineFormat = "%sseverity%mmessage") ==
+                "%sseverity%mmessage");
+
+         // date formatting tests
+         assert((testConfig.logLineFormat = "%{%d}t") == "%{%d}t");
+         assert((testConfig.logLineFormat = "%{%Y}t") == "%{%Y}t");
+         assert((testConfig.logLineFormat = "%{%H}t") == "%{%H}t");
+         assert((testConfig.logLineFormat = "%{%M}t") == "%{%M}t");
+         assert((testConfig.logLineFormat = "%{%S}t") == "%{%S}t");
+         assert((testConfig.logLineFormat = "%{%m}t") == "%{%m}t");
+         assert((testConfig.logLineFormat = "%{%d %Y %H %M %S %m}t") ==
+                "%{%d %Y %H %M %S %m}t");
+         assert((testConfig.logLineFormat =
+                  "%{%d}t %{%Y}t %{%H}t %{%M}t %{%S}t %{%m}t") ==
+                "%{%d}t %{%Y}t %{%H}t %{%M}t %{%S}t %{%m}t");
+
+         // the result should be accepted by formattedWrite
+         Appender!string bh;
+         testConfig.logLineFormat = "%%%t%i%f%l%s%m%{%d %Y %H %M %S %m}t";
+         formattedWrite(bh, testConfig._internalLogLineFormat, 
+                        1, "", 1, "", "", 1, 1, 1, 1, 1, 1);
+      }
+
+      /++
+         Specifies the format for every log line.
+
+         The string can contain literal characters copied into the log files
+         and the C-style control characters "\n" and "\t" to represent
+         new-lines and tabs. Literal quotes and backslashes should be escaped
+         with backslashes.
+
+         The attributes of a log line are logged by placing "%" directives in
+         the format string.
+
+         $(BOOKTABLE Directives are mapped to logging values as follow.,
+            $(TR $(TH Directive)
+                 $(TH Semantics))
+            $(TR $(TD %%)
+                 $(TD The percent sign.))
+            $(TR $(TD %{...}t)
+                 $(TD The time when the log line was generated.))
+            $(TR $(TD %H)
+                 $(TD The hour as a decimal number using a 24-hour clock.))
+            $(TR $(TD %i)
+                 $(TD The id of the thread which generated the log line.))
+            $(TR $(TD %M)
+                 $(TD The minute as a decimal number.))
+            $(TR $(TD %f)
+                 $(TD The name of the file which generated the log line.))
+            $(TR $(TD %S)
+                 $(TD The second as a decimal number.))
+            $(TR $(TD %m)
+                 $(TD The log message.)))
+
+         For $(B %{...}t) the $(B {...}) is optional.
+        
+         $(BOOKTABLE  Directives inside the curly brakets in $(B %{...}t) are
+                      mapped as follows.,
+            $(TR $(TH Directive)
+                 $(TH Semantics))
+            $(TR $(TD %%)
+                 $(TD The percent sign.))
+            $(TR $(TD %m)
+                 $(TD The month as a decimal number.))
+            $(TR $(TD %d)
+                 $(TD The day of the month as a decimal number.))
+            $(TR $(TD %Y)
+                 $(TD The year as a decimal number including the century.))
+            $(TR $(TD %H)
+                 $(TD The hour as a decimal number using a 24-hour clock.))
+            $(TR $(TD %M)
+                 $(TD The minute as a decimal number.))
+            $(TR $(TD %S)
+                 $(TD The second as a decimal number.)))
+
+         The default value is $(D "%s%t %i %f:%l] %m").
+       +/
+      @property string logLineFormat(string format)
+      {
+         static const string threadIdFormat = "%1$x";
+         static const string fileFormat = "%2$s";
+         static const string lineFormat = "%3$d";
+         static const string severityFormat = "%4$s";
+         static const string messageFormat = "%5$s";
+         static const string yearFormat = "%6$.2d";
+         static const string monthFormat = "%7$.2d";
+         static const string dayFormat = "%8$.2d";
+         static const string hourFormat = "%9$.2d";
+         static const string minuteFormat = "%10$.2d";
+         static const string secondFormat = "%11$.2d";
+
+         Appender!string result;
+         enum State { start, escaped,
+                      dateFormat, dateFormatEscaped, dateFormatFinished };
+         State state;
+         foreach(size_t i, f; format)
+         {
+            final switch(state)
+            {
+               case State.escaped:
+                  switch(f)
+                  {
+                     case '{':
+                        state = State.dateFormat;
+                        break;
+                     case '%':
+                        result.put("%%");
+                        state = State.start;
+                        break;
+                     case 't':
+                        result.put(monthFormat ~ dayFormat ~ " " ~
+                                   hourFormat ~ ":" ~ minuteFormat ~ ":" ~
+                                   secondFormat);
+                        state = State.start;
+                        break;
+                     case 'i':
+                        result.put(threadIdFormat);
+                        state = State.start;
+                        break;
+                     case 'f':
+                        result.put(fileFormat);
+                        state = State.start;
+                        break;
+                     case 'l':
+                        result.put(lineFormat);
+                        state = State.start;
+                        break;
+                     case 's':
+                        result.put(severityFormat);
+                        state = State.start;
+                        break;
+                     case 'm':
+                        result.put(messageFormat);
+                        state = State.start;
+                        break;
+                     default:
+                        throw new Exception("Error parsing '" ~
+                                            format ~
+                                            "' at postion " ~
+                                            to!string(i) ~
+                                            " found invalid character '" ~
+                                            to!string(f) ~
+                                            "'.");
+                  }
+                  break;
+               case State.dateFormat:
+                  switch(f)
+                  {
+                     case '%':
+                        state = State.dateFormatEscaped;
+                        break;
+                     case '}':
+                        state = State.dateFormatFinished;
+                        break;
+                     default:
+                        result.put(f);
+                  }
+                  break;
+               case State.dateFormatEscaped:
+                  switch(f)
+                  {
+                     case '%':
+                        result.put("%%");
+                        state = State.dateFormat;
+                        break;
+                     case 'd':
+                        result.put(dayFormat);
+                        state = State.dateFormat;
+                        break;
+                     case 'Y':
+                        result.put(yearFormat);
+                        state = State.dateFormat;
+                        break;
+                     case 'H':
+                        result.put(hourFormat);
+                        state = State.dateFormat;
+                        break;
+                     case 'M':
+                        result.put(minuteFormat);
+                        state = State.dateFormat;
+                        break;
+                     case 'S':
+                        result.put(secondFormat);
+                        state = State.dateFormat;
+                        break;
+                     case 'm':
+                        result.put(monthFormat);
+                        state = State.dateFormat;
+                        break;
+                     default:
+                        throw new Exception("Error parsing '" ~
+                                            format ~
+                                            "' at postion " ~
+                                            to!string(i) ~
+                                            " found invalid character '" ~
+                                            to!string(f) ~
+                                            "'.");
+                  }
+                  break;
+               case State.dateFormatFinished:
+                  switch(f)
+                  {
+                     case 't':
+                        state = State.start;
+                        break;
+                     default:
+                        throw new Exception("Error parsing '" ~
+                                            format ~
+                                            "' at postion " ~
+                                            to!string(i) ~
+                                            " found invalid character '" ~
+                                            to!string(f) ~
+                                            "'.");
+                  }
+                  break;
+               case State.start:
+                  switch(f)
+                  {
+                     case '%':
+                        state = State.escaped;
+                        break;
+                     default:
+                        result.put(f);
+                  }
+                  break;
+            }
+         }
+
+         result.put(newline[]);
+
+         _internalLogLineFormat = result.data;
+         return _logLineFormat = format;
+      }
+      @property string logLineFormat() { return _logLineFormat; } /// ditto
+
+      unittest
+      {
+         auto loggerConfig = FileLogger.Configuration.create();
+         
+         assert((loggerConfig.severitySymbols = "12345") == "12345");
+         assertThrown(loggerConfig.severitySymbols = "1234");
+         assertThrown(loggerConfig.severitySymbols = "123456");
+      }
+
+      /++
+         Specifies the symbols to use in the log line for severities.
+
+         The value of the severity as define in Severity is used to index into
+         the string. The lenght of the string must equals $(D Severity.max + 1).
+
+         Example:
+         ---
+auto loggerConfig = FileLogger.Configuration.create();
+assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
+         ---
+
+         The default value is $(D "FCEWI").
+         +/
+      @property dstring severitySymbols(dstring symbols)
+      {
+         enforce(symbols.length == Severity.max + 1);
+
+         return _severitySymbols = symbols;
+      }
+      @property dstring severitySymbols() { return _severitySymbols; }
+
+      private @property string internalLogLineFormat()
+      {
+         if(_internalLogLineFormat is null) logLineFormat = _logLineFormat;
+
+         return _internalLogLineFormat;
+      }
+
       private string _name;
       private bool _logToStderr;
       private bool _alsoLogToStderr;
       private Severity _stderrThreshold = Severity.error;
       private string _logDirectory;
       private size_t _bufferSize = 4 * 1024;
+      private string _logLineFormat = "%s%t %i %f:%l] %m";
+      private string _internalLogLineFormat;
+      private dstring _severitySymbols = "FCEWI";
    }
 
    /++
@@ -1530,6 +1826,9 @@ class FileLogger(Writer) if(isWriter!Writer) : Logger
       enforce(loggerConfig.name);
 
       _bufferSize = loggerConfig.bufferSize;
+      _logLineFormat = loggerConfig.logLineFormat;
+      _internalLogLineFormat = loggerConfig.internalLogLineFormat;
+      _severitySymbols = loggerConfig.severitySymbols;
       _mutex = new Mutex;
 
       // Create file for every severity; add one more for stderr
@@ -1572,12 +1871,17 @@ class FileLogger(Writer) if(isWriter!Writer) : Logger
                                  toupper(to!string(cast(Severity)severity)),
                                  ".",
                                  time.toISOString()));
+         _symlinks ~= join(loggerConfig.logDirectory,
+                           text(loggerConfig.name,
+                                ".log.",
+                                toupper(to!string(cast(Severity)severity))));
       }
    }
 
    /// Writes a _log message to all the _log files of equal or lower severity.
    shared void log(const ref LogMessage message)
    {
+      auto time = cast(DateTime) message.time;
       synchronized(_mutex)
       {
          foreach(i; _indices[message.severity])
@@ -1587,15 +1891,29 @@ class FileLogger(Writer) if(isWriter!Writer) : Logger
             {
                _writers[i].open(_filenames[i], "w");
                _writers[i].setvbuf(_bufferSize);
+
+               _writers[i].writef("Log file created at: %s" ~ newline ~
+                                  "Running on machine: %s" ~ newline ~
+                                  "Log line format: %s" ~ newline,
+                                  time.toISOExtString(),
+                                  hostname,
+                                  _logLineFormat);
+
+               // create symlink 
+               symlink(basename(_filenames[i]), _symlinks[i]);
             }
-            _writers[i].writef("%s:%x %s:%s %s %s%s",
-                               message.time.toISOString(),
+            _writers[i].writef(_internalLogLineFormat,
                                message.threadId,
                                message.file,
                                message.line,
-                               toupper(to!string(message.severity)),
+                               _severitySymbols[message.severity],
                                message.message,
-                               newline);
+                               time.year,
+                               cast(int)time.month,
+                               time.day,
+                               time.hour,
+                               time.minute,
+                               time.second);
          }
       }
    }
@@ -1612,29 +1930,51 @@ class FileLogger(Writer) if(isWriter!Writer) : Logger
       }
    }
 
+   private shared @property string hostname()
+   {
+      static shared string result;
+
+      if(result is null)
+      {
+         result = Socket.hostName;
+         result = result ? result : "[unknown]";
+      }
+
+      return result;
+   }
+
+   private shared void symlink(string target, string linkName)
+   {
+      version(unittest) {} // don't have any side effect in unittest
+      else version(Posix)
+      {
+         if(exists(linkName) && isSymLink(linkName)) remove(linkName);
+         .symlink(toStringz(target), toStringz(linkName));
+      }
+      // TODO: Need Windows Vista to test this implementation
+   }
+
    private size_t _bufferSize;
+   private string _logLineFormat;
+   private string _internalLogLineFormat;
+   private dstring _severitySymbols;
 
    private Mutex _mutex; // rwmutex wont preserve the order
    private string[] _filenames;
+   private string[] _symlinks;
    private size_t[][] _indices;
    __gshared Writer[] _writers;
+
+   version(unittest) private alias TestWriter Writer;
+   else private alias File Writer;
 }
 
 unittest
 {
+   assert(isWriter!TestWriter);
    assert(isWriter!File);
 }
 
-private template isWriter(Writer)
-{
-   enum bool isWriter =
-      __traits(compiles, { Writer w;
-                           if(!w.isOpen) w.open("name", "w");
-                           w.setvbuf(1024);
-                           w.writef("format", 1, true, "", 3.4);
-                           w.flush();
-                           w = stderr; });
-}
 
 /++
 Extension point for the module.
@@ -1994,16 +2334,16 @@ static this()
 shared static this()
 {
    LogFilter._noopLogFilter = new LogFilter;
-   noopLogFilter = new NoopLogFilter;
+   _noopLogFilter = new NoopLogFilter;
 
    auto args = Runtime.args;
 
-   auto loggerConfig = FileLogger!(File).Configuration.create();
+   auto loggerConfig = FileLogger.Configuration.create();
 
    try loggerConfig.parseCommandLine(args);
    catch(Exception e) { /+ ignore any error +/ }
 
-   auto logger = new FileLogger!File(loggerConfig);
+   auto logger = new FileLogger(loggerConfig);
    config = new Configuration(logger);
 
    try config.parseCommandLine(args);
@@ -2017,12 +2357,23 @@ private LogFilter _warning;
 private LogFilter _info;
 
 __gshared Configuration config;
-__gshared NoopLogFilter noopLogFilter;
+private __gshared NoopLogFilter _noopLogFilter;
 
 version(unittest)
 {
+   private template isWriter(Writer)
+   {
+      enum bool isWriter =
+         __traits(compiles, { Writer w;
+                              if(!w.isOpen) w.open("name", "w");
+                              w.setvbuf(1024);
+                              w.writef("format", 1, true, "", 3.4);
+                              w.flush();
+                              w = stderr; });
+   }
+
    // Test severity filtering
-   class TestLogger : Logger
+   private class TestLogger : Logger
    {
       shared void log(const ref LogMessage msg)
       {
@@ -2049,7 +2400,7 @@ version(unittest)
       bool flushCalled;
    }
 
-   struct TestWriter
+   private struct TestWriter
    {
       struct Data
       {
