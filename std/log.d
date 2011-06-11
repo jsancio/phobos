@@ -2,12 +2,7 @@
 // XXX rename LogFilter
 // XXX test changing Flag in parseCommandLine for FileLogger.Configuration
 // XXX test failure in parseCommandLine for FileLogger.Configuration
-// XXX check all template parameters
 // XXX make sure that the examples are correct.
-// XXX rename dfatal and vlog to debugFatal and verbose.
-
-// TODO remove the use of text!
-// TODO Allow the configuration of the log file name
 
 /++
 Implements an application level logging mechanism.
@@ -100,35 +95,32 @@ Source: $(PHOBOSSRC std/_log.d)
 +/
 module std.log;
 
-import core.thread : Thread;
-import core.sync.mutex : Mutex;
-import core.sync.rwmutex : ReadWriteMutex;
-import core.runtime : Runtime;
-import core.time : Duration;
-import std.stdio; //: File, stderr;
-import std.string : newline, toupper, capitalize, toStringz;
-import std.conv : text, to;
-import std.datetime: Clock, SysTime, UTC, FracSec, DateTime;
-import std.exception : enforce;
-import std.getopt : getopt;
-import std.process : getenv;
-import std.array : Appender, array;
-import std.format : formattedWrite;
-import std.path : fnmatch, join, basename;
-import std.algorithm : endsWith, splitter;
-import std.functional : unaryFunImpl, binaryFunImpl;
-import std.socket : Socket;
-import std.file : exists, isSymLink, remove;
+import core.thread;
+import core.sync.mutex;
+import core.sync.rwmutex;
+import core.runtime;
+import core.time;
+import std.stdio;
+import std.string;
+import std.conv;
+import std.datetime;
+import std.exception;
+import std.getopt;
+import std.process;
+import std.array;
+import std.format;
+import std.path;
+import std.algorithm;
+import std.functional;
+import std.file;
 
-version(Posix) import core.sys.posix.unistd : symlink;
-
-version(unittest)
+version(Posix)
 {
-   import core.exception : AssertError;
-   import core.time : dur;
-   import std.exception : assertThrown;
-   import std.algorithm : startsWith;
+   import core.sys.posix.unistd;
+   import core.sys.posix.sys.utsname;
 }
+
+version(unittest) import core.exception;
 
 /++
 Fatal log messages terminate the application after the message is persisted.
@@ -254,7 +246,7 @@ template logImpl(Severity severity)
    else version(strip_log_info) private alias Severity.warning minSeverity;
    else private alias Severity.info minSeverity;
 
-   static if(severity > minSeverity) alias _noopLogFilter filter;
+   static if(severity > minSeverity) alias NoopLogFilter._singleton filter;
    else
    {
       static if(severity == Severity.info) alias _info filter;
@@ -501,6 +493,7 @@ log!info("The value of pi is ", pi);
 
          // record message
          scope(exit) writer.clear();
+         writer.reserve(1);
          foreach(T, arg; args) writer.put(to!(char[])(arg));
          _message.message = writer.data;
 
@@ -634,7 +627,7 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
       return _noopLogFilter;
    }
 
-   private ref Appender!(char[]) writer()
+   private @property ref Appender!(char[]) writer()
    {
       if(_privateBuffer) return _privateWriter;
       else return _threadWriter;
@@ -684,15 +677,26 @@ unittest
 // Used by the module to disable logging at compile time.
 final class NoopLogFilter
 {
-   @property bool willLog() const { return false; }
+   pure nothrow const @property bool willLog() { return false; }
 
-   ref NoopLogFilter when(lazy bool now) { return this; }
-   ref NoopLogFilter when(lazy Rich!bool now) { return this; }
-   void write(T...)(lazy T args) {}
+   nothrow const ref const(NoopLogFilter) when(lazy bool now)
+   { return this; }
+   nothrow const ref const(NoopLogFilter) when(lazy Rich!bool now)
+   { return this; }
+
+   nothrow const void write(T...)(lazy T args) {}
    alias write opCall;
-   void format(T...)(lazy string fmt, lazy T args) {}
+   nothrow const void format(T...)(lazy string fmt, lazy T args) {}
 
-   ref NoopLogFilter vlog(int level, string file = __FILE__) { return this; }
+   pure nothrow const ref const(NoopLogFilter) vlog(int level,
+                                                    string file = null)
+   { return this; }
+
+   private this() {}
+
+   private static immutable NoopLogFilter _singleton;
+
+   shared static this() { _singleton = new immutable(NoopLogFilter); }
 }
 
 /// Defines the severity levels supported by the logging library.
@@ -1208,10 +1212,9 @@ unittest
    message.severity = Severity.info;
    auto logger = new shared(FileLogger)(loggerConfig);
    logger.log(message);
-   foreach(ref key, ref data; TestWriter.writers)
+   foreach(key, ref data; TestWriter.writers)
    {
-      if(startsWith(key, "test.log.INFO") && data.lines.length == 2)
-         ++passed;
+      if(canFind(key, ".INFO.log.") && data.lines.length == 2) ++passed;
       else assert(data.lines.length == 0);
    }
    assert(passed == 1);
@@ -1222,11 +1225,10 @@ unittest
    message.severity = Severity.warning;
    logger = new shared(FileLogger)(loggerConfig);
    logger.log(message);
-   foreach(ref key, ref data; TestWriter.writers)
+   foreach(key, ref data; TestWriter.writers)
    {
-      if(startsWith(key, "test.log.INFO") && data.lines.length == 2 ||
-         startsWith(key, "test.log.WARNING") && data.lines.length == 2)
-         ++passed;
+      if(canFind(key, ".INFO.log.") && data.lines.length == 2 ||
+         canFind(key, ".WARNING.log.") && data.lines.length == 2) ++passed;
       else assert(data.lines.length == 0);
    }
    assert(passed == 2);
@@ -1240,10 +1242,9 @@ unittest
    loggerConfig.stderrThreshold = Severity.error;
    logger = new shared(FileLogger)(loggerConfig);
    logger.log(message);
-   foreach(ref key, ref data; TestWriter.writers)
+   foreach(key, ref data; TestWriter.writers)
    {
-      if(key == "stderr file" && data.lines.length == 1)
-         ++passed;
+      if(key == "stderr file" && data.lines.length == 1) ++passed;
       else assert(data.lines.length == 0);
    }
    assert(passed == 1);
@@ -1258,13 +1259,12 @@ unittest
    loggerConfig.stderrThreshold = Severity.error;
    logger = new shared(FileLogger)(loggerConfig);
    logger.log(message);
-   foreach(ref key, ref data; TestWriter.writers)
+   foreach(key, ref data; TestWriter.writers)
    {
-      if(startsWith(key, "test.log.INFO") && data.lines.length == 2 ||
-         startsWith(key, "test.log.WARNING") && data.lines.length == 2 ||
-         startsWith(key, "test.log.ERROR") && data.lines.length == 2 ||
-         key == "stderr file" && data.lines.length == 1)
-         ++passed;
+      if(canFind(key, ".INFO.log.") && data.lines.length == 2 ||
+         canFind(key, ".WARNING.log.") && data.lines.length == 2 ||
+         canFind(key, ".ERROR.log.") && data.lines.length == 2 ||
+         key == "stderr file" && data.lines.length == 1) ++passed;
       else assert(data.lines.length == 0);
    }
    assert(passed == 4);
@@ -1274,15 +1274,13 @@ unittest
    passed = 0;
    message.severity = Severity.info;
 
-   loggerConfig.logToStderr = false;
    loggerConfig.alsoLogToStderr = false;
    loggerConfig.logDirectory = "/dir";
    logger = new shared(FileLogger)(loggerConfig);
    logger.log(message);
-   foreach(ref key, ref data; TestWriter.writers)
+   foreach(key, ref data; TestWriter.writers)
    {
-      if(startsWith(key, "/dir/test.log.INFO") && data.lines.length == 2)
-         ++passed;
+      if(startsWith(key, "/dir/") && data.lines.length == 2) ++passed;
       else assert(data.lines.length == 0);
    }
    assert(passed == 1);
@@ -1292,16 +1290,48 @@ unittest
    passed = 0;
    message.severity = Severity.info;
 
-   loggerConfig.logToStderr = false;
-   loggerConfig.alsoLogToStderr = false;
    loggerConfig.logDirectory = "";
    loggerConfig.bufferSize = 32;
    logger = new shared(FileLogger)(loggerConfig);
    logger.log(message);
-   foreach(ref key, ref data; TestWriter.writers)
+   foreach(key, ref data; TestWriter.writers)
    {
-      if(startsWith(key, "/dir/test.log.INFO")) assert(data.bufferSize == 32);
+      if(canFind(key, ".INFO.log.") && data.bufferSize == 32) ++passed;
+      else assert(data.bufferSize == 0);
    }
+   assert(passed == 1);
+
+   // test severity symbols
+   TestWriter.clear();
+   passed = 0;
+   loggerConfig = FileLogger.Configuration.create();
+   loggerConfig.severitySymbols = "12345";
+   logger = new shared(FileLogger)(loggerConfig);
+   logger.log(message);
+   foreach(key, ref data; TestWriter.writers)
+   {
+      if(canFind(key, ".INFO.log.") && data.lines.length == 2)
+      {
+         assert(startsWith(data.lines[1], "5"));
+         ++passed;
+      } else assert(data.lines.length == 0);
+   }
+   assert(passed == 1);
+
+   // test file names - warning message but should only log to info file
+   TestWriter.clear();
+   passed = 0;
+   message.severity = Severity.warning;
+   loggerConfig = FileLogger.Configuration.create();
+   loggerConfig.logFileNamePrefixes(["F", "C", "E", "", "I"]);
+   logger = new shared(FileLogger)(loggerConfig);
+   logger.log(message);
+   foreach(key, ref data; TestWriter.writers)
+   {
+      if(startsWith(key, "I.log.") && data.lines.length == 2) ++passed;
+      else assert(data.lines.length == 0);
+   }
+   assert(passed == 1);
 }
 
 /++
@@ -1551,9 +1581,9 @@ class FileLogger : Logger
                 "%{%d}t %{%Y}t %{%H}t %{%M}t %{%S}t %{%m}t");
 
          // the result should be accepted by formattedWrite
-         Appender!string bh;
+         auto bh = appender!string();
          testConfig.logLineFormat = "%%%t%i%f%l%s%m%{%d %Y %H %M %S %m}t";
-         formattedWrite(bh, testConfig._internalLogLineFormat, 
+         formattedWrite(bh, testConfig._internalLogLineFormat,
                         1, "", 1, "", "", 1, 1, 1, 1, 1, 1);
       }
 
@@ -1589,7 +1619,7 @@ class FileLogger : Logger
                  $(TD The log message.)))
 
          For $(B %{...}t) the $(B {...}) is optional.
-        
+
          $(BOOKTABLE  Directives inside the curly brakets in $(B %{...}t) are
                       mapped as follows.,
             $(TR $(TH Directive)
@@ -1625,7 +1655,7 @@ class FileLogger : Logger
          static const string minuteFormat = "%10$.2d";
          static const string secondFormat = "%11$.2d";
 
-         Appender!string result;
+         auto result = appender!string();
          enum State { start, escaped,
                       dateFormat, dateFormatEscaped, dateFormatFinished };
          State state;
@@ -1772,7 +1802,7 @@ class FileLogger : Logger
       unittest
       {
          auto loggerConfig = FileLogger.Configuration.create();
-         
+
          assert((loggerConfig.severitySymbols = "12345") == "12345");
          assertThrown(loggerConfig.severitySymbols = "1234");
          assertThrown(loggerConfig.severitySymbols = "123456");
@@ -1782,7 +1812,7 @@ class FileLogger : Logger
          Specifies the symbols to use in the log line for severities.
 
          The value of the severity as define in Severity is used to index into
-         the string. The lenght of the string must equals $(D Severity.max + 1).
+         the string. The length of the string must equal $(D Severity.max + 1).
 
          Example:
          ---
@@ -1798,7 +1828,55 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
 
          return _severitySymbols = symbols;
       }
+      /// ditto
       @property dstring severitySymbols() { return _severitySymbols; }
+
+      unittest
+      {
+         auto testConfig = FileLogger.Configuration.create();
+
+         assert(testConfig.logFileNamePrefixes(["F", "C", "E", "", "I"]) ==
+                ["F", "C", "E", "", "I"]);
+         assert(testConfig.logFileNamePrefixes(null) == null);
+         assertThrown(testConfig.logFileNamePrefixes(["F"]));
+         assertThrown(testConfig.logFileNamePrefixes(["", "", "", "", "", ""]));
+      }
+
+      /++
+         Specifies the prefix for the name of log files.
+
+         If this value is specified the log file of severity error will have
+         the prefix $(D logFileNamePrefixes[Severity.error]). prefixes should
+         either by null or the length must equal $(Severity.max + 1). If the
+         value is null then log file names are
+         "<program>.<hostname>.<user>.<severity>.log.<datetime>.<pid>" (E.g.
+         hello.example.com.guest.log.INFO.20110609T050018Z.743).
+
+         If an entry contains the empty string a log file will not be created
+         for that severity.
+
+         The default value is $(D null).
+       +/
+      @property string[] logFileNamePrefixes(string[] prefixes)
+      {
+         enforce(prefixes == null || prefixes.length == Severity.max + 1);
+
+         return _logFileNamePrefixes = prefixes;
+      }
+      /// ditto
+      @property string[] logFileNamePrefixes() { return _logFileNamePrefixes; }
+
+      /++
+         Specifies the extension for the name of log files.
+
+         The default value is $(D ".log").
+       +/
+      @property string logFileNameExtension(string extension)
+      {
+         return _logFileNameExtension = extension;
+      }
+      /// ditto
+      @property string logFileNameExtension() { return _logFileNameExtension; }
 
       private @property string internalLogLineFormat()
       {
@@ -1816,6 +1894,8 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
       private string _logLineFormat = "%s%t %i %f:%l] %m";
       private string _internalLogLineFormat;
       private dstring _severitySymbols = "FCEWI";
+      private string[] _logFileNamePrefixes;
+      private string _logFileNameExtension = ".log";
    }
 
    /++
@@ -1830,6 +1910,9 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
       _internalLogLineFormat = loggerConfig.internalLogLineFormat;
       _severitySymbols = loggerConfig.severitySymbols;
       _mutex = new Mutex;
+
+      // init hostname
+      _hostname = hostname;
 
       // Create file for every severity; add one more for stderr
       _writers = new Writer[Severity.max + 2];
@@ -1863,18 +1946,64 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
       time.fracSec = FracSec.from!"msecs"(0);
 
       // create the file name for all the writers
-      foreach(severity; 0 .. _writers.length - 1)
+      auto nameBuffer = appender!(char[])();
+      if(loggerConfig.logFileNamePrefixes)
       {
-         _filenames ~= join(loggerConfig.logDirectory,
-                            text(loggerConfig.name,
-                                 ".log.",
-                                 toupper(to!string(cast(Severity)severity)),
-                                 ".",
-                                 time.toISOString()));
-         _symlinks ~= join(loggerConfig.logDirectory,
-                           text(loggerConfig.name,
-                                ".log.",
-                                toupper(to!string(cast(Severity)severity))));
+         foreach(prefix; loggerConfig.logFileNamePrefixes)
+         {
+            if(prefix != null)
+            {
+               nameBuffer.clear();
+               formattedWrite(nameBuffer,
+                              "%s%s.%s.%s",
+                              prefix,
+                              loggerConfig.logFileNameExtension,
+                              time.toISOString(),
+                              getpid());
+               _filenames ~= std.path.join(loggerConfig.logDirectory,
+                                           nameBuffer.data);
+
+               nameBuffer.clear();
+               formattedWrite(nameBuffer,
+                              "%s%s",
+                              prefix,
+                              loggerConfig.logFileNameExtension);
+               _symlinks ~= std.path.join(loggerConfig.logDirectory,
+                                          nameBuffer.data);
+            }
+            else
+            {
+               _filenames ~= null;
+               _symlinks ~= null;
+            }
+         }
+      }
+      else
+      {
+         foreach(severity; 0 .. _writers.length - 1)
+         {
+            nameBuffer.clear();
+            formattedWrite(nameBuffer,
+                           "%s.%s.%s.%s%s.%s.%s",
+                           loggerConfig.name,
+                           _hostname,
+                           username,
+                           toupper(to!string(cast(Severity)severity)),
+                           loggerConfig.logFileNameExtension,
+                           time.toISOString(),
+                           getpid());
+            _filenames ~= std.path.join(loggerConfig.logDirectory,
+                                        nameBuffer.data);
+
+            nameBuffer.clear();
+            formattedWrite(nameBuffer,
+                           "%s.%s%s",
+                           loggerConfig.name,
+                           toupper(to!string(cast(Severity)severity)),
+                           loggerConfig.logFileNameExtension);
+            _symlinks ~= std.path.join(loggerConfig.logDirectory,
+                                       nameBuffer.data);
+         }
       }
    }
 
@@ -1886,8 +2015,11 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
       {
          foreach(i; _indices[message.severity])
          {
+            // don't write if we are suppose to have a name but don't have one.
+            if(i < _filenames.length && _filenames[i] == null) continue;
+
             // open file if is not opened and we have a name for it
-            if(!_writers[i].isOpen && i < _filenames.length)
+            if(i < _filenames.length && !_writers[i].isOpen)
             {
                _writers[i].open(_filenames[i], "w");
                _writers[i].setvbuf(_bufferSize);
@@ -1896,10 +2028,10 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
                                   "Running on machine: %s" ~ newline ~
                                   "Log line format: %s" ~ newline,
                                   time.toISOExtString(),
-                                  hostname,
+                                  _hostname,
                                   _logLineFormat);
 
-               // create symlink 
+               // create symlink
                symlink(basename(_filenames[i]), _symlinks[i]);
             }
             _writers[i].writef(_internalLogLineFormat,
@@ -1930,17 +2062,38 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
       }
    }
 
-   private shared @property string hostname()
+   private @property string hostname()
    {
-      static shared string result;
-
-      if(result is null)
+      // TODO: test in windows
+      string name;
+      version(Posix)
       {
-         result = Socket.hostName;
-         result = result ? result : "[unknown]";
+         utsname buf;
+         if(uname(&buf) == 0)
+         {
+            name = to!string(buf.nodename.ptr);
+         }
+      }
+      else version(Windows)
+      {
+         char[MAX_COMPUTERNAME_LENGTH + 1] buf;
+         if(GetComputerNameA(buf.ptr, buf.length) == 0)
+         {
+            name = to!string(buf.ptr);
+         }
       }
 
-      return result;
+      return name ? name : "unknown";
+   }
+
+   private @property string username()
+   {
+      // TODO: test in windows
+      string name;
+      version(Posix) name = getenv("LOGNAME");
+      else version(Windows) name = getenv("USERNAME");
+
+      return name ? name : "unknown";
    }
 
    private shared void symlink(string target, string linkName)
@@ -1958,6 +2111,7 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
    private string _logLineFormat;
    private string _internalLogLineFormat;
    private dstring _severitySymbols;
+   private string _hostname;
 
    private Mutex _mutex; // rwmutex wont preserve the order
    private string[] _filenames;
@@ -2225,6 +2379,77 @@ bool after(string file = __FILE__, int line = __LINE__)(Duration n)
    return false;
 }
 
+unittest
+{
+   assert(rich!"=="(1, 1));
+   assert(rich!"!="(1, 2));
+   assert(rich!">"(2, 1));
+   assert(rich!">="(2, 2) && rich!">="(2, 1));
+   assert(rich!"<"(1, 2));
+   assert(rich!"<="(1, 2) && rich!"<="(1, 1));
+   assert(rich!"&&"(rich!"=="(1, 1), rich!"!="(1, 2)));
+   assert(rich!"||"(rich!"<"(1, 1), rich!"=="(1, 1)));
+
+   assert(!rich!"=="(1, 2));
+   assert(!rich!"!="(1, 1));
+   assert(!rich!">"(1, 1));
+   assert(!rich!">="(1, 2));
+   assert(!rich!"<"(2, 2));
+   assert(!rich!"<="(3, 2));
+   assert(!rich!"&&"(rich!"=="(1, 1), rich!"!="(1, 1)));
+   assert(!rich!"||"(rich!"<="(1, 0), rich!"=="(1, 0)));
+
+   assert(is(typeof(rich!"&&"(rich!"=="(1, 1), rich!"!="(1, 1))) == Rich!bool));
+   assert(is(typeof(rich!"=="(1, 2)) == Rich!bool));
+}
+
+/++
+   Rich data
+ +/
+template rich(string exp)
+   if(isBinaryOp(exp))
+{
+   Rich!(binaryFunImpl!("a" ~ exp ~ "b", "a", "b").Body!(T, R).ReturnType)
+      rich(T, R)(T a, R b)
+      if(__traits(compiles, { T a; to!string(a); }) &&
+         __traits(compiles, { R b; to!string(b); }))
+   {
+      auto value = binaryFunImpl!("a" ~ exp ~ "b", "a", "b").result(a, b);
+      auto reason = to!string(value) ~ " = (" ~
+                    to!string(a) ~ " " ~
+                    exp ~ " " ~
+                    to!string(b) ~ ")";
+
+      typeof(return) result = { value, reason };
+      return result;
+   }
+}
+
+unittest
+{
+   assert(rich!"!"(false));
+   assert(rich!"!"(rich!"!="(1, 1)));
+
+   assert(is(typeof(rich!"!"(false)) == Rich!bool));
+   assert(is(typeof(rich!"!"(rich!"!="(1, 1))) == Rich!bool));
+}
+
+/// ditto
+template rich(string exp)
+   if(exp == "!")
+{
+   Rich!bool rich(T)(T a)
+      if(__traits(compiles, { T a; bool b = !a; to!string(a); }))
+   {
+      auto value = !a;
+      auto reason = to!string(value) ~ " = (!" ~ to!string(a) ~ ")";
+
+      typeof(return) result = { value, reason };
+      return result;
+   }
+}
+
+/// ditto
 struct Rich(Type)
    if(is(Type == bool))
 {
@@ -2268,60 +2493,6 @@ private bool isBinaryOp(string op)
    }
 }
 
-unittest
-{
-   assert(rich!"=="(1, 1));
-   assert(rich!"!="(1, 2));
-   assert(rich!">"(2, 1));
-   assert(rich!">="(2, 2) && rich!">="(2, 1));
-   assert(rich!"<"(1, 2));
-   assert(rich!"<="(1, 2) && rich!"<="(1, 1));
-   assert(rich!"&&"(rich!"=="(1, 1), rich!"!="(1, 2)));
-   assert(rich!"||"(rich!"<"(1, 1), rich!"=="(1, 1)));
-
-   assert(!rich!"=="(1, 2));
-   assert(!rich!"!="(1, 1));
-   assert(!rich!">"(1, 1));
-   assert(!rich!">="(1, 2));
-   assert(!rich!"<"(2, 2));
-   assert(!rich!"<="(3, 2));
-   assert(!rich!"&&"(rich!"=="(1, 1), rich!"!="(1, 1)));
-   assert(!rich!"||"(rich!"<="(1, 0), rich!"=="(1, 0)));
-}
-
-template rich(string exp)
-   if(isBinaryOp(exp))
-{
-   Rich!(binaryFunImpl!("a" ~ exp ~ "b", "a", "b").Body!(T, R).ReturnType)
-      rich(T, R)(T a, R b)
-      if(__traits(compiles, { T a; to!string(a); }) &&
-         __traits(compiles, { R b; to!string(b); }))
-   {
-      auto value = binaryFunImpl!("a" ~ exp ~ "b", "a", "b").result(a, b);
-      auto reason = to!string(value) ~ " = (" ~
-                    to!string(a) ~ " " ~
-                    exp ~ " " ~
-                    to!string(b) ~ ")";
-
-      typeof(return) result = { value, reason };
-      return result;
-   }
-}
-
-template rich(string exp)
-   if(exp == "!")
-{
-   Rich!bool rich(T)(T a)
-      if(__traits(compiles, { T a; bool b = !a; to!string(a); }))
-   {
-      auto value = !a;
-      auto reason = to!string(value) ~ " = (!" ~ to!string(a) ~ ")";
-
-      typeof(return) result = { value, reason };
-      return result;
-   }
-}
-
 static this()
 {
    _fatal = new LogFilter(Severity.fatal, config);
@@ -2334,7 +2505,6 @@ static this()
 shared static this()
 {
    LogFilter._noopLogFilter = new LogFilter;
-   _noopLogFilter = new NoopLogFilter;
 
    auto args = Runtime.args;
 
@@ -2357,7 +2527,6 @@ private LogFilter _warning;
 private LogFilter _info;
 
 __gshared Configuration config;
-private __gshared NoopLogFilter _noopLogFilter;
 
 version(unittest)
 {
@@ -2432,9 +2601,9 @@ version(unittest)
       void writef(S...)(S args)
       {
          assert(name in writers, name);
-         writer.clear();
+         auto writer = appender!string();
          formattedWrite(writer, args);
-         writers[name].lines ~= writer.data.idup;
+         writers[name].lines ~= writer.data;
       }
 
       void flush()
@@ -2454,6 +2623,5 @@ version(unittest)
       static void clear() { writers = null; }
 
       static Data[string] writers;
-      static Appender!(char[]) writer;
    }
 }
