@@ -1,7 +1,5 @@
 // Written in the D programming language.
 // XXX rename LogFilter
-// XXX test changing Flag in parseCommandLine for FileLogger.Configuration
-// XXX test failure in parseCommandLine for FileLogger.Configuration
 // XXX make sure that the examples are correct.
 
 /++
@@ -740,7 +738,7 @@ unittest
    assert(testConfig.matchesVerboseFilter("std/logging.d", 2));
    assert(testConfig.matchesVerboseFilter("module.d", 0));
 
-   // === test changing the flag ===
+   // === test changing the command line flags ===
    // remember the defaults
    auto defaultSeverityFlag = Configuration.minSeverityFlag;
    auto defaultFilterFlag = Configuration.verboseFilterFlag;
@@ -1380,6 +1378,69 @@ class FileLogger : Logger
       loggerConfig = Configuration.create();
       loggerConfig.parseCommandLine(args);
       assert(loggerConfig.alsoLogToStderr);
+
+      // === test changing the command line flags ===
+      // remember the defaults
+      auto defaultLogToStderrFlag = Configuration.logToStderrFlag;
+      auto defaultAlsoLogToStderrFlag = Configuration.alsoLogToStderrFlag;
+      auto defaultStderrThresholdFlag = Configuration.stderrThresholdFlag;
+      auto defaultLogDirectoryFlag = Configuration.logDirectoryFlag;
+
+      // change the default
+      Configuration.logToStderrFlag = "stderr";
+      Configuration.alsoLogToStderrFlag = "alsoStderr";
+      Configuration.stderrThresholdFlag = "threshold";
+      Configuration.logDirectoryFlag = "dir";
+
+      args = [name,
+              "--" ~ Configuration.logToStderrFlag,
+              "--" ~ Configuration.alsoLogToStderrFlag,
+              "--" ~ Configuration.stderrThresholdFlag,
+              "warning",
+              "--" ~ Configuration.logDirectoryFlag,
+              "logdir",
+              "--" ~ defaultStderrThresholdFlag,
+              "--" ~ defaultLogDirectoryFlag];
+
+      loggerConfig = Configuration.create();
+      loggerConfig.parseCommandLine(args);
+
+      // assert that all expected options where removed
+      assert(args.length == 3);
+      assert(args[0] == name);
+
+      assert(loggerConfig.logToStderr == true);
+      assert(loggerConfig.alsoLogToStderr == true);
+      assert(loggerConfig.stderrThreshold == Severity.warning);
+      assert(loggerConfig.logDirectory == "logdir");
+
+      // reset the defaults
+      Configuration.logToStderrFlag = defaultLogToStderrFlag;
+      Configuration.alsoLogToStderrFlag = defaultAlsoLogToStderrFlag;
+      Configuration.stderrThresholdFlag = defaultStderrThresholdFlag;
+      Configuration.logDirectoryFlag = defaultLogDirectoryFlag;
+
+      // === test an error parsing the command line doesn't invalidated object
+      args = [name,
+              "--" ~ Configuration.logToStderrFlag,
+              "--" ~ Configuration.alsoLogToStderrFlag,
+              "--" ~ Configuration.stderrThresholdFlag,
+              "parsingError",
+              "--" ~ Configuration.logDirectoryFlag,
+              "logdir"];
+
+      loggerConfig = Configuration.create();
+      loggerConfig.logToStderr = false;
+      loggerConfig.alsoLogToStderr = false;
+      loggerConfig.stderrThreshold = Severity.info;
+      loggerConfig.logDirectory = "/tmp";
+
+      assertThrown(loggerConfig.parseCommandLine(args));
+
+      assert(loggerConfig.logToStderr == false);
+      assert(loggerConfig.alsoLogToStderr == false);
+      assert(loggerConfig.stderrThreshold == Severity.info);
+      assert(loggerConfig.logDirectory = "/tmp");
    }
 
    /++
@@ -1852,8 +1913,8 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
          "<program>.<hostname>.<user>.<severity>.log.<datetime>.<pid>" (E.g.
          hello.example.com.guest.log.INFO.20110609T050018Z.743).
 
-         If an entry contains the empty string a log file will not be created
-         for that severity.
+         If an entry contains the empty string no log file is created for that
+         severity.
 
          The default value is $(D null).
        +/
