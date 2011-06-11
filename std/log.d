@@ -1,40 +1,24 @@
 // Written in the D programming language.
-// XXX rename LogFilter
 // XXX make sure that the examples are correct.
 
 /++
 Implements an application level logging mechanism.
 
----
-import std.log;
-
-void main()
-{
-   bool errorCond;
-
-   log!info("Print this message", " when info severity is enabled.");
-   log!error.when(errorCond)("Logs this error message when errorCond is true.");
-   log!fatal.format("Calling %s will exit the process", to!string(Level.fatal));
-   vlog(1)("Verbose level 1 message");
-}
----
-
 This module defines a set of functions useful for many common logging tasks.
-The module allows the logging of messages at different severity levels and at
-different verbose level. Log messages at different severity levels and verbose
-level can be disabled and enabled both at compile time and at run time. The
-module can also _log depending on user defined boolean conditions. The module
-includes some commonly use conditions like $(D every) 'n' times and $(D first)
-'n' times.
+The module allows for the logging of messages at different severity levels and
+at different verbose level. The module provides the functionality to disabled
+and enabled log messaging both at compile time and at run time. The module can
+also _log depending on user defined boolean conditions. The module includes
+some commonly use conditions like $(D every) number of times and $(D first)
+number of times.
 
-Four logging severity levels are defined - in other of severity they are:
+Five logging severity levels are defined. In the other of severity they are:
 $(D info), $(D warning), $(D error), $(D critical) and $(D fatal). Verbose
-messages are logged using $(D vlog).
+messages are logged using the $(D vlog) template.
 
-If the module is not initialized it will configure itself using the command
-line arguments passed to the process and the process's enviroment variables.
-For a list of command line option and enviroment variable, and their meaning
-see $(D Configuration) and $(D FileLogger.Configuration).
+By default the module will configure itself using the command line arguments
+passed to the process and using the process's enviroment variables. For a list
+of the default command line options and enviroment variables, and their meaning see $(D Configuration) and $(D FileLogger.Configuration).
 
 Example:
 ---
@@ -45,12 +29,10 @@ void main(string[] args)
    log!info.format("You passed %s argument(s)", args.length - 1);
    log!info.when(args.length > 1)("Arguments: ", args[1 .. $]);
 
-   log!info("This is an info message.");
    log!warning("This is a warning message.");
    log!error("This is an error message!");
    log!dfatal("This is a debug fatal message");
 
-   vlog(0)("Verbosity 0 message");
    vlog(1)("Verbosity 1 message");
    vlog(2)("Verbosity 2 message");
 
@@ -65,8 +47,6 @@ void main(string[] args)
          // ...
          log!info(message);
       }
-
-      vlog(2).when(first())("Verbose message only on the first iterations");
    }
 
    try log!critical("Critical message");
@@ -80,8 +60,10 @@ void main(string[] args)
 ---
 
 BUGS:
-Not tested on Windows. Log messages do not contain the logging thread when
-using vanilla druntime.
+$(UL
+   $(LI Not tested on Windows.)
+   $(LI Doesn't work with the standard druntime. Changes to druntime where made
+        to provide the required functionality.))
 
 Copyright: Jose Armando Garcia Sancio 2011-.
 
@@ -121,84 +103,83 @@ version(Posix)
 version(unittest) import core.exception;
 
 /++
-Fatal log messages terminate the application after the message is persisted.
-Fatal log message cannot be disabled at compile time or at run time.
+Maps to the $(D LogFilter) for the specified severity.
 
 Example:
 ---
-log!fatal("A fatal message!");
+log!info("Info severity message");
+log!warning("Warning severity message");
+log!error("Error severity message");
+log!critical("Critical severity message");
+log!dfatal("Fatal message in debug mode and critical message in release mode");
+log!fatal("Fatal severity message");
 ---
+
+$(BOOKTABLE Descripton of the supported severities.,
+   $(TR $(TH Severity) $(TH Description))
+   $(TR $(TD $(D fatal))
+        $(TD Logs a fatal severity message. Fatal _log messages terminate the
+             application after the message is persisted. Fatal _log message
+             cannot be disabled at compile time or at run time.))
+   $(TR $(TD $(D dfatal))
+        $(TD Logs a debug fatal message. Debug fatal _log messages _log at
+             fatal severity in debug mode and _log at critical severity in
+             release mode. See fatal and critical severity levels for a
+             description of their behavior.))
+   $(TR $(TD $(D critical))
+        $(TD Logs a critical severity message. Critical _log messages throw an
+             exception after the message is persisted. Critical _log messages
+             cannot be disabled at compile time or at run time.))
+   $(TR $(TD $(D error))
+        $(TD Logs an error severity message. Error _log messages are disabled
+             at compiled time by setting the version to $(I strip_log_error).
+             Error _log messages are disabled at run time by setting the
+             minimun severity to $(D Level.fatal) or $(D Level.critical) in
+             $(D Configuration). Disabling _error _log messages at compile time
+             or at run time also disables lower severity messages, e.g. warning
+             and info.))
+   $(TR $(TD $(D warning))
+        $(TD Logs a warning severity message. Warning _log messages are
+             disabled at compiled time by setting the version to
+             $(I strip_log_warning). Warning _log messages are disabled at run
+             time by setting the minimum severity to $(D Level.error) in
+             $(D Configuration). Disabling _warning _log messages at compile
+             time or at run time also disables lower severity messages, e.g.
+             info.))
+   $(TR $(TD $(D info))
+        $(TD Logs a info severity message. Info _log messages are disabled at
+             compiled time by setting the version to $(I strip_log_info). Info
+             _log messages are disabled at run time by setting the minimum
+             severity to $(D Level.warning) in $(D Configuration). Disabling
+             _info _log messages at compile time or at run time also disables
+             verbose _log messages.)))
 +/
-alias Severity.fatal fatal;
+template log(Severity severity)
+{
+   alias logImpl!(severity).filter log;
+}
 
-/++
-Debug fatal log messages log at fatal severity in debug mode and log at
-critical severity in release mode. See fatal and critical severity levels for
-a description of their behavior.
+private template logImpl(Severity severity)
+{
+   version(strip_log_error) private alias Severity.critical minSeverity;
+   else version(strip_log_warning) private alias Severity.error minSeverity;
+   else version(strip_log_info) private alias Severity.warning minSeverity;
+   else private alias Severity.info minSeverity;
 
-Example:
----
-log!dfatal("A fatal message in debug and an error message in release!");
----
-+/
-debug alias Severity.fatal dfatal;
-else alias Severity.critical dfatal;
-
-/++
-Critical log messages throw an exception after the message is persisted.
-Critical log messages cannot be disabled at compile time or at run time.
-
-Example:
----
-log!critical("A critical message!");
----
-+/
-alias Severity.critical critical;
-
-/++
-Error log messages are disabled at compiled time by setting the version to
-'strip_log_error'. Error log messages are disabled at run time by setting the
-minimun severity to $(D Level.fatal) or $(D Level.critical) in
-$(D Configuration). Disabling _error log messages at compile time or at run
-time also disables lower severity messages, e.g. warning and info.
-
-Example:
----
-log!error("An error message!");
----
-+/
-alias Severity.error error;
-
-/++
-Warning log messages are disabled at compiled time by setting the version to
-'strip_log_warning'. Warning log messages are disabled at run time by setting
-the minimum severity to $(D Level.error) in $(D Configuration).  Disabling
-_warning log messages at compile time or at run time also disables lower
-severity messages, e.g. info.
-
-Example:
----
-log!warning("A warning message!");
----
-+/
-alias Severity.warning warning;
-
-/++
-Info log messages are disabled at compiled time by setting the version to
-'strip_log_info'. Info log messages are disabled at run time by setting the
-minimum severity to $(D Level.warning) in $(D Configuration).  Disabling _info
-log messages at compile time or at run time also disables verbose log messages.
-
-Example:
----
-log!info("An info message!");
----
-+/
-alias Severity.info info;
+   static if(severity > minSeverity) alias NoopLogFilter._singleton filter;
+   else
+   {
+      static if(severity == Severity.info) alias _info filter;
+      else static if(severity == Severity.warning) alias _warning filter;
+      else static if(severity == Severity.error) alias _error filter;
+      else static if(severity == Severity.critical) alias _critical filter;
+      else static if(severity == Severity.fatal) alias _fatal filter;
+   }
+}
 
 /++
 Verbose log messages are log at the info severity _level. To disable them at
-compile time set the version to 'strip_log_info' which also disables all
+compile time set the version to $(I strip_log_info) which also disables all
 messages of info severity at compile time. To enable verbose log messages at
 run time use the the maximum verbose _level property and the verbose filter
 property in $(D Configuration).
@@ -217,41 +198,6 @@ auto vlog(string file = __FILE__)(int level)
    else
    {
       return _info.vlog(level, file);
-   }
-}
-
-/++
-Maps to the $(D LogFilter) for the specified severity.
-
-Example:
----
-log!info("Info severity message");
-log!warning("Warning severity message");
-log!error("Error severity message");
-log!critical("Critical severity message");
-log!fatal("Fatal severity message");
----
-+/
-template log(Severity severity)
-{
-   alias logImpl!(severity).filter log;
-}
-
-template logImpl(Severity severity)
-{
-   version(strip_log_error) private alias Severity.critical minSeverity;
-   else version(strip_log_warning) private alias Severity.error minSeverity;
-   else version(strip_log_info) private alias Severity.warning minSeverity;
-   else private alias Severity.info minSeverity;
-
-   static if(severity > minSeverity) alias NoopLogFilter._singleton filter;
-   else
-   {
-      static if(severity == Severity.info) alias _info filter;
-      else static if(severity == Severity.warning) alias _warning filter;
-      else static if(severity == Severity.error) alias _error filter;
-      else static if(severity == Severity.critical) alias _critical filter;
-      else static if(severity == Severity.fatal) alias _fatal filter;
    }
 }
 
@@ -334,9 +280,9 @@ defined condition.
 
 Examples:
 ---
-log!error("Log an ", to!string(Level.error), " message!");
-log!error.write("Log an ", to!string(Level.error), " message!");
-log!error.format("Also logs an %s message!", to!string(Level.error));
+log!error("Log an ", to!string(Severity.error), " message!");
+log!error.write("Log an ", to!string(Severity.error), " message!");
+log!error.format("Also logs an %s message!", to!string(Severity.error));
 ---
 Logs a message if the specified severity level is enabled.
 
@@ -353,6 +299,16 @@ foreach(i; 0 .. 10)
 }
 ---
 Logs a message if the specified severity level is enabled and all the user
+defined condition are true.
+
+---
+void removeDirectory(string dir = "/tmp/log")
+{
+   log!info.when(rich!"!="(dir, "/tmp/log"))("Trying to remove dir");
+   // ...
+}
+---
+Logs a rich message if the specified severity level is enabled and all the user
 defined condition are true.
 +/
 final class LogFilter
@@ -396,8 +352,8 @@ if(log!error.willLog)
    }
 
    /++
-      Returns this object if the parameter $(D now) evaluates to true and if a
-      message can be logged. Note: The $(D now) parameter is only evaluated if
+      Returns this object if the parameter now evaluates to true and if a
+      message can be logged. Note: The now parameter is only evaluated if
       a message can be logged with this object.
 
       Example:
@@ -429,9 +385,9 @@ foreach(i; 0 .. 10)
    }
 
    /++
-      Returns this object if the parameter $(D now) evaluates to true and if a
+      Returns this object if the parameter now evaluates to true and if a
       message can be logged. It also appends the log message with a reason why
-      it is true. Note: The $(D now) parameter is only evaluated if a message
+      it is true. Note: The now parameter is only evaluated if a message
       can be logged with this object.
 
       Example:
@@ -504,7 +460,7 @@ log!info("The value of pi is ", pi);
    alias write opCall; /// ditto
 
    /++
-      Formats the parameters $(D args) given the _format string $(D fmt) and
+      Formats the parameters args given the _format string fmt and
       logs them. Note: The parameters are only evaluated if a message can be
       logged. For a description of the _format string see
       $(D std._format.formattedWrite).
@@ -638,14 +594,14 @@ vlog(1).format("The number %s is the golden ratio", goldenRatio);
 
    private static Appender!(char[]) _threadWriter;
 
-   private static __gshared LogFilter _noopLogFilter;
+   __gshared private static LogFilter _noopLogFilter;
+
+   shared static this() { _noopLogFilter = new LogFilter; }
 }
 
 final class CriticalException : Exception
 {
-   private this(string message,
-        string file = __FILE__,
-        int line = __LINE__)
+   private this(string message, string file = __FILE__, int line = __LINE__)
    {
       super(message, null, file, line);
    }
@@ -706,6 +662,14 @@ enum Severity
    warning, /// ditto
    info /// ditto
 }
+
+alias Severity.fatal fatal;
+debug alias Severity.fatal dfatal;
+else alias Severity.critical dfatal;
+alias Severity.critical critical;
+alias Severity.error error;
+alias Severity.warning warning;
+alias Severity.info info;
 
 unittest
 {
@@ -827,12 +791,9 @@ final class Configuration
          $(LI $(D verboseFilterFlag) maps to $(D verboseFilter))
          $(LI $(D maxVerboseLevelFlag) maps to $(D maxVerboseLevel)))
 
-      Any valid field is removed from commandLine; any invalid field is left in
-      commandLine.
-
       Note:
-      A call to the function is not required if the module will be initialized
-      using the command line's default options.
+      A call to this function is not required if the module will be initialized
+      using the default options.
     +/
    void parseCommandLine(ref string[] commandLine)
    {
@@ -854,19 +815,21 @@ final class Configuration
 
    /++
       Command line flag for setting the minimum severity level. The default
-      value is "minloglevel" which at the command line is '--minloglevel'.
+      value is $(D "minloglevel") which at the command line is
+      $(I --minloglevel).
     +/
    static shared string minSeverityFlag = "minloglevel";
 
    /++
-      Command line flag for setting the verbose configuration per module.  The
-      default value is "vmodule" which at the command line is '--vmodule'.
+      Command line flag for setting the per module verbose fileter
+      configuration. The default value is $(D "vmodule") which at the command
+      line is $(I --vmodule).
     +/
    static shared string verboseFilterFlag = "vmodule";
 
    /++
       Command line flag for setting the maximum verbose level. The default
-      value is "v" which at the command line is '--v'.
+      value is $(D "v") which at the command line is $(I --v).
     +/
    static shared string maxVerboseLevelFlag = "v";
 
@@ -880,7 +843,7 @@ final class Configuration
    }
 
    /++
-      Specifies the minimum _severity of the messages that are logged.
+      Specifies the minimum _severity for logging messages.
 
       Only messages with a _severity greater than or equal to the value of this
       property are logged.
@@ -918,12 +881,12 @@ final class Configuration
    }
 
    /++
-      Specifies the maximum verbose _level of verbose messages that can logged.
+      Specifies the maximum verbose _level for logging verbose messages.
 
-      Verbose messages with a verbose _level less than or equal to the value of
-      this property are logged. This property is ignore of the module logging
-      the verbose message matches a module specified in the verbose
-      configuration for modules property.
+      Verbose messages are logged if their verbose _level is less than or equal
+      to the value of this property. This property is ignore if the module
+      logging the verbose message matches an entry specified in the property
+      for per module verbose filtering.
 
       The default value is $(D int.min).
     +/
@@ -983,19 +946,19 @@ final class Configuration
    }
 
    /++
-      Specifies the verbose configuration for modules.
+      Specifies the per module verbose filter configuration.
 
-      A verbose message with level $(D x) is get logged at severity level info
-      if there is an entry that matches to the source file and the verbose
-      level of that entry is greater than or equal to $(D x).
+      A verbose message with level $(I x) gets logged at severity level info
+      if there is an entry that matches the source file, and if the verbose
+      level of that entry is greater than or equal to $(I x).
 
       The format of the configuration string is as follow
-      "[pattern]=[level],...", where '[pattern]' may contain any character
-      allowed in a file name and '[level]' is convertible to an integer.
-      Every '*' in '[pattern]' matches any number of characters. Every '?' in
-      '[pattern]' matches exactly one character.
+      $(I [pattern]=[level],...), where $(I [pattern]) may contain any
+      character allowed in a file name and $(I [level]) is convertible to an
+      integer. Any $(I *) in $(I [pattern]) matches any number of characters.
+      Any $(I ?) in $(I [pattern]) matches exactly one character.
 
-      For every '[pattern]=[level]' in the configuration string an entry is
+      For every $(I [pattern]=[level]) in the configuration string an entry is
       created.
 
       Example:
@@ -1005,18 +968,18 @@ config.verboseFilter = "module=2,great*=3,*test=1";
 
       The code above sets a verbose logging configuration that:
       $(UL
-         $(LI Log verbose 2 and lower messages from 'module{,.d}')
-         $(LI Log verbose 3 and lower messages from anyting starting with
+         $(LI Logs verbose 2 and lower messages from 'module{,.d}')
+         $(LI Logs verbose 3 and lower messages from anything starting with
               'great')
-         $(LI Log verbose 1 and lower messages from any file that ends with
+         $(LI Logs verbose 1 and lower messages from any file that ends with
               'test{,.d}'))
 
-      Note: If the module trying to log a verbose message matches but the
-      verbose level don't match, then the maximum verbose level property is
-      ignored.
+      Note: If the verbose message matches the pattern part of the entry but
+      doesn't match the verbose level, then the maximum verbose level property
+      is ignored.
 
-      E.g. In the default configuration if the command line contains "--v=2
-      --vmodule=web=1".
+      E.g. In the default configuration if the command line contains $(I --v=2
+      --vmodule=web=1).
       ---
 module web;
 
@@ -1024,9 +987,8 @@ module web;
 
 vlog(2)("Verbose message is not logged");
       ---
-
-      The verbose message is not logged even though it is less than or equal to
-      2, as specified in the command line.
+      The verbose message above is not logged even though it is less than or
+      equal to 2, as specified in the command line.
 
       The default value is $(D null).
     +/
@@ -1073,7 +1035,7 @@ vlog(2)("Verbose message is not logged");
       Function pointer for handling log message with a severity of fatal.
 
       This function is called by the thread trying to log a fatal message. The
-      function handler should not return; otherwise the framework calls
+      function handler should not return; otherwise $(D std.log) will
       $(D assert(false)).
 
       The default value is $(D function void() {}).
@@ -1091,8 +1053,8 @@ vlog(2)("Verbose message is not logged");
    /++
       Implementation of the $(D Logger) interface used to persiste log messages
 
-      This property allows the caller to change and configure the the backend
-      logger to a different $(D Logger). It will throw an exception if it is
+      This property allows the caller to change and configure the backend
+      _logger to a different $(D Logger). It will throw an exception if it is
       changed after a logging call has been made.
 
       The default value a $(D FileLogger).
@@ -1101,7 +1063,7 @@ vlog(2)("Verbose message is not logged");
       ---
 import std.log;
 
-class NullLogger : Logger
+final class NullLogger : Logger
 {
    shared void log(const ref LogMessage message) {}
    shared void flush() {}
@@ -1109,7 +1071,7 @@ class NullLogger : Logger
 
 void main(string[] args)
 {
-   config.logger = new NullLogger();
+   config.logger = new shared(NullLogger);
    // ...
 }
       ---
@@ -1193,6 +1155,9 @@ void main(string[] args)
 
    private ReadWriteMutex _rwmutex;
 }
+/// ditto
+__gshared Configuration config;
+
 
 unittest
 {
@@ -1321,7 +1286,7 @@ unittest
    passed = 0;
    message.severity = Severity.warning;
    loggerConfig = FileLogger.Configuration.create();
-   loggerConfig.logFileNamePrefixes(["F", "C", "E", "", "I"]);
+   loggerConfig.fileNamePrefixes(["F", "C", "E", "", "I"]);
    logger = new shared(FileLogger)(loggerConfig);
    logger.log(message);
    foreach(key, ref data; TestWriter.writers)
@@ -1340,7 +1305,7 @@ $(D FileLogger.Configuration). This logger writes log messages to multiple
 files. There is a file for every severity level. Log messages of a given
 severity are written to all the log files of an equal or lower severity. E.g.
 A log message of severity warning will be written to the log files for warning
-and info but not to the log files of fatal and error.
+and info but not to the log files for fatal and error.
 +/
 class FileLogger : Logger
 {
@@ -1455,18 +1420,16 @@ class FileLogger : Logger
          command line options. All of the valid options are enumerated in the
          static fields of this structure that end in 'Flag', e.g.
          logToStderrFlag. When a valid command line option is found its value
-         is stored in the mapping object's property. For any property not set
-         explictly its default value is used. Here is a list of all the flags
-         and how they map to the object's property:
+         is stored in the mapping object's property and it is removed from
+         commandLine. For any property not set explictly its default value is
+         used. Here is a list of all the flags and how they map to the object's
+         property:
 
          $(UL
             $(LI $(D logToStderrFlag) maps to $(D logToStderr))
             $(LI $(D alsoLogToStderrFlag) maps to $(D alsoLogToStderr))
             $(LI $(D stderrThresholdFlag) maps to $(D stderrThreshold))
             $(LI $(D logDirectoryFlag) maps to $(D logDirectory)))
-
-         Any valid field is removed from commandLine; any invalid field is
-         left in commandLine.
 
          The $(D name) property is set to the program name, i.e. the first
          element of commandLine.
@@ -1496,30 +1459,31 @@ class FileLogger : Logger
 
       /++
          Command line flag for logging to stderr. The default value is
-         "logtostderr" which at the command line is '--logtostderr'.
+         $(D "logtostderr") which at the command line is $(I --logtostderr).
        +/
       static string logToStderrFlag = "logtostderr";
 
       /++
          Command line flag for logging to stderr and files. The default value
-         is "alsologtostderr" which at the command line is '--alsologtostderr'.
+         is $(D "alsologtostderr") which at the command line is
+         $(I --alsologtostderr).
        +/
       static string alsoLogToStderrFlag = "alsologtostderr";
 
       /++
          Command line flag for setting the stderr logging threshold. The
-         default value is "stderrthreshold" which at the command line is
-         '--stderrthreshold'.
+         default value is $(D "stderrthreshold") which at the command line is
+         $(I --stderrthreshold).
        +/
       static string stderrThresholdFlag = "stderrthreshold";
 
       /++
          Command line flag for setting the logging directory. The default
-         value is "logdir" which at the command line is '--logdir'.
+         value is $(D "logdir") which at the command line is $(I --logdir).
        +/
       static string logDirectoryFlag = "logdir";
 
-      /// Create file logger configuration.
+      /// Creates a default file logger configuration.
       static Configuration create()
       {
          Configuration loggerConfig;
@@ -1539,7 +1503,7 @@ class FileLogger : Logger
       /++
          Name to use when generating log file names.
 
-         The default value is the program name.
+         The default value is the program _name.
        +/
       @property string name(string name) { return _name = name; }
       @property const string name() { return _name; }
@@ -1587,8 +1551,8 @@ class FileLogger : Logger
          Specifies the directory where log files are created.
 
          The default value for this property is the value in the enviroment
-         variable 'LOGDIR'. If 'LOGDIR' is not set, then 'TEST_TMPDIR' is
-         used. If 'TEST_TMPDIR' is not set, then it logs to the current
+         variable $(I LOGDIR). If $(I LOGDIR) is not set, then $(I TEST_TMPDIR)
+         is used. If $(I TEST_TMPDIR) is not set, then it logs to the current
          directory.
        +/
       @property string logDirectory(string logDirectory)
@@ -1611,53 +1575,48 @@ class FileLogger : Logger
       unittest
       {
          auto testConfig = Configuration.create();
-         assert((testConfig.logLineFormat = "%%") == "%%");
-         assert((testConfig.logLineFormat = "%t") == "%t");
-         assert((testConfig.logLineFormat = "%i") == "%i");
-         assert((testConfig.logLineFormat = "%f") == "%f");
-         assert((testConfig.logLineFormat = "%l") == "%l");
-         assert((testConfig.logLineFormat = "%s") == "%s");
-         assert((testConfig.logLineFormat = "%m") == "%m");
-         assert((testConfig.logLineFormat = "%t%i%f%l%s%m") == "%t%i%f%l%s%m");
+         assert((testConfig.lineFormat = "%%") == "%%");
+         assert((testConfig.lineFormat = "%t") == "%t");
+         assert((testConfig.lineFormat = "%i") == "%i");
+         assert((testConfig.lineFormat = "%f") == "%f");
+         assert((testConfig.lineFormat = "%l") == "%l");
+         assert((testConfig.lineFormat = "%s") == "%s");
+         assert((testConfig.lineFormat = "%m") == "%m");
+         assert((testConfig.lineFormat = "%t%i%f%l%s%m") == "%t%i%f%l%s%m");
 
-         assertThrown(testConfig.logLineFormat = "% ");
-         assertThrown(testConfig.logLineFormat = "%k");
+         assertThrown(testConfig.lineFormat = "% ");
+         assertThrown(testConfig.lineFormat = "%k");
 
-         assert((testConfig.logLineFormat = "string without percent") ==
+         assert((testConfig.lineFormat = "string without percent") ==
                 "string without percent");
-         assert((testConfig.logLineFormat = "%sseverity%mmessage") ==
+         assert((testConfig.lineFormat = "%sseverity%mmessage") ==
                 "%sseverity%mmessage");
 
          // date formatting tests
-         assert((testConfig.logLineFormat = "%{%d}t") == "%{%d}t");
-         assert((testConfig.logLineFormat = "%{%Y}t") == "%{%Y}t");
-         assert((testConfig.logLineFormat = "%{%H}t") == "%{%H}t");
-         assert((testConfig.logLineFormat = "%{%M}t") == "%{%M}t");
-         assert((testConfig.logLineFormat = "%{%S}t") == "%{%S}t");
-         assert((testConfig.logLineFormat = "%{%m}t") == "%{%m}t");
-         assert((testConfig.logLineFormat = "%{%d %Y %H %M %S %m}t") ==
+         assert((testConfig.lineFormat = "%{%d}t") == "%{%d}t");
+         assert((testConfig.lineFormat = "%{%Y}t") == "%{%Y}t");
+         assert((testConfig.lineFormat = "%{%H}t") == "%{%H}t");
+         assert((testConfig.lineFormat = "%{%M}t") == "%{%M}t");
+         assert((testConfig.lineFormat = "%{%S}t") == "%{%S}t");
+         assert((testConfig.lineFormat = "%{%m}t") == "%{%m}t");
+         assert((testConfig.lineFormat = "%{%d %Y %H %M %S %m}t") ==
                 "%{%d %Y %H %M %S %m}t");
-         assert((testConfig.logLineFormat =
+         assert((testConfig.lineFormat =
                   "%{%d}t %{%Y}t %{%H}t %{%M}t %{%S}t %{%m}t") ==
                 "%{%d}t %{%Y}t %{%H}t %{%M}t %{%S}t %{%m}t");
 
          // the result should be accepted by formattedWrite
          auto bh = appender!string();
-         testConfig.logLineFormat = "%%%t%i%f%l%s%m%{%d %Y %H %M %S %m}t";
-         formattedWrite(bh, testConfig._internalLogLineFormat,
+         testConfig.lineFormat = "%%%t%i%f%l%s%m%{%d %Y %H %M %S %m}t";
+         formattedWrite(bh, testConfig._internalLineFormat,
                         1, "", 1, "", "", 1, 1, 1, 1, 1, 1);
       }
 
       /++
-         Specifies the format for every log line.
+         Specifies the _format for every log line.
 
-         The string can contain literal characters copied into the log files
-         and the C-style control characters "\n" and "\t" to represent
-         new-lines and tabs. Literal quotes and backslashes should be escaped
-         with backslashes.
-
-         The attributes of a log line are logged by placing "%" directives in
-         the format string.
+         The attributes of a log line are logged by placing $(I %) directives
+         in the _format string.
 
          $(BOOKTABLE Directives are mapped to logging values as follow.,
             $(TR $(TH Directive)
@@ -1666,22 +1625,21 @@ class FileLogger : Logger
                  $(TD The percent sign.))
             $(TR $(TD %{...}t)
                  $(TD The time when the log line was generated.))
-            $(TR $(TD %H)
-                 $(TD The hour as a decimal number using a 24-hour clock.))
             $(TR $(TD %i)
                  $(TD The id of the thread which generated the log line.))
-            $(TR $(TD %M)
-                 $(TD The minute as a decimal number.))
+            $(TR $(TD %s)
+                 $(TD The severity of the log line.))
             $(TR $(TD %f)
                  $(TD The name of the file which generated the log line.))
-            $(TR $(TD %S)
-                 $(TD The second as a decimal number.))
+            $(TR $(TD %l)
+                 $(TD The line number which genereated the log line.))
             $(TR $(TD %m)
                  $(TD The log message.)))
 
-         For $(B %{...}t) the $(B {...}) is optional.
+         The directive $(I %t) is the same as $(I %{%m%d %H:%M:%S}t) as
+         described below.
 
-         $(BOOKTABLE  Directives inside the curly brakets in $(B %{...}t) are
+         $(BOOKTABLE  Directives inside the curly brakets in $(I %{...}t) are
                       mapped as follows.,
             $(TR $(TH Directive)
                  $(TH Semantics))
@@ -1702,11 +1660,11 @@ class FileLogger : Logger
 
          The default value is $(D "%s%t %i %f:%l] %m").
        +/
-      @property string logLineFormat(string format)
+      @property string lineFormat(string format)
       {
          static const string threadIdFormat = "%1$x";
          static const string fileFormat = "%2$s";
-         static const string lineFormat = "%3$d";
+         static const string lineNumberFormat = "%3$d";
          static const string severityFormat = "%4$s";
          static const string messageFormat = "%5$s";
          static const string yearFormat = "%6$.2d";
@@ -1749,7 +1707,7 @@ class FileLogger : Logger
                         state = State.start;
                         break;
                      case 'l':
-                        result.put(lineFormat);
+                        result.put(lineNumberFormat);
                         state = State.start;
                         break;
                      case 's':
@@ -1855,10 +1813,10 @@ class FileLogger : Logger
 
          result.put(newline[]);
 
-         _internalLogLineFormat = result.data;
-         return _logLineFormat = format;
+         _internalLineFormat = result.data;
+         return _lineFormat = format;
       }
-      @property string logLineFormat() { return _logLineFormat; } /// ditto
+      @property string lineFormat() { return _lineFormat; } /// ditto
 
       unittest
       {
@@ -1870,15 +1828,17 @@ class FileLogger : Logger
       }
 
       /++
-         Specifies the symbols to use in the log line for severities.
+         Specifies the _symbols to use for each severities when writing to file.
 
-         The value of the severity as define in Severity is used to index into
-         the string. The length of the string must equal $(D Severity.max + 1).
+         The value of the severities as define in $(D Severity) is used to
+         index into the string. The length of the string must equal
+         $(D Severity.max + 1).
 
          Example:
          ---
 auto loggerConfig = FileLogger.Configuration.create();
-assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
+loggerConfig.severitySymbols = "12345";
+assert(loggerConfig.severitySymbols[Severity.fatal] == '1');
          ---
 
          The default value is $(D "FCEWI").
@@ -1896,54 +1856,61 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
       {
          auto testConfig = FileLogger.Configuration.create();
 
-         assert(testConfig.logFileNamePrefixes(["F", "C", "E", "", "I"]) ==
+         assert(testConfig.fileNamePrefixes(["F", "C", "E", "", "I"]) ==
                 ["F", "C", "E", "", "I"]);
-         assert(testConfig.logFileNamePrefixes(null) == null);
-         assertThrown(testConfig.logFileNamePrefixes(["F"]));
-         assertThrown(testConfig.logFileNamePrefixes(["", "", "", "", "", ""]));
+         assert(testConfig.fileNamePrefixes(null) == null);
+         assertThrown(testConfig.fileNamePrefixes(["F"]));
+         assertThrown(testConfig.fileNamePrefixes(["", "", "", "", "", ""]));
       }
 
       /++
-         Specifies the prefix for the name of log files.
+         Specifies the prefix for the name of the log files.
 
-         If this value is specified the log file of severity error will have
-         the prefix $(D logFileNamePrefixes[Severity.error]). prefixes should
-         either by null or the length must equal $(Severity.max + 1). If the
-         value is null then log file names are
-         "<program>.<hostname>.<user>.<severity>.log.<datetime>.<pid>" (E.g.
-         hello.example.com.guest.log.INFO.20110609T050018Z.743).
-
-         If an entry contains the empty string no log file is created for that
-         severity.
+         The paramater should either by $(D null) or be a length of
+         $(D Severity.max + 1).
+        
+         If the value is not null the value stored in $(I prefixes[i]) will be
+         used as the prefix for severity $(I i), where $(I i) is a value
+         defined in $(D Severity). For example the file name for severity error
+         will have the prefix $(D fileNamePrefixes[Severity.error]).  If an
+         entry in the array contains the empty string, then no log file is
+         created for that severity.
+        
+         If the value is null then log file names are
+         $(I [program].[hostname].[user].[severity].log.[datetime].[pid]). For
+         example if the program is $(I hello), the host name is
+         $(I example.com) and the user name is $(I guest) then the file name
+         for severity info will be:
+         $(I hello.example.com.guest.INFO.log.20110609T050018Z.743).
 
          The default value is $(D null).
        +/
-      @property string[] logFileNamePrefixes(string[] prefixes)
+      @property string[] fileNamePrefixes(string[] prefixes)
       {
          enforce(prefixes == null || prefixes.length == Severity.max + 1);
 
-         return _logFileNamePrefixes = prefixes;
+         return _fileNamePrefixes = prefixes;
       }
       /// ditto
-      @property string[] logFileNamePrefixes() { return _logFileNamePrefixes; }
+      @property string[] fileNamePrefixes() { return _fileNamePrefixes; }
 
       /++
          Specifies the extension for the name of log files.
 
          The default value is $(D ".log").
        +/
-      @property string logFileNameExtension(string extension)
+      @property string fileNameExtension(string extension)
       {
-         return _logFileNameExtension = extension;
+         return _fileNameExtension = extension;
       }
       /// ditto
-      @property string logFileNameExtension() { return _logFileNameExtension; }
+      @property string fileNameExtension() { return _fileNameExtension; }
 
-      private @property string internalLogLineFormat()
+      private @property string internalLineFormat()
       {
-         if(_internalLogLineFormat is null) logLineFormat = _logLineFormat;
+         if(_internalLineFormat is null) lineFormat = _lineFormat;
 
-         return _internalLogLineFormat;
+         return _internalLineFormat;
       }
 
       private string _name;
@@ -1952,11 +1919,11 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
       private Severity _stderrThreshold = Severity.error;
       private string _logDirectory;
       private size_t _bufferSize = 4 * 1024;
-      private string _logLineFormat = "%s%t %i %f:%l] %m";
-      private string _internalLogLineFormat;
+      private string _lineFormat = "%s%t %i %f:%l] %m";
+      private string _internalLineFormat;
       private dstring _severitySymbols = "FCEWI";
-      private string[] _logFileNamePrefixes;
-      private string _logFileNameExtension = ".log";
+      private string[] _fileNamePrefixes;
+      private string _fileNameExtension = ".log";
    }
 
    /++
@@ -1967,8 +1934,8 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
       enforce(loggerConfig.name);
 
       _bufferSize = loggerConfig.bufferSize;
-      _logLineFormat = loggerConfig.logLineFormat;
-      _internalLogLineFormat = loggerConfig.internalLogLineFormat;
+      _lineFormat = loggerConfig.lineFormat;
+      _internalLineFormat = loggerConfig.internalLineFormat;
       _severitySymbols = loggerConfig.severitySymbols;
       _mutex = new Mutex;
 
@@ -2008,9 +1975,9 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
 
       // create the file name for all the writers
       auto nameBuffer = appender!(char[])();
-      if(loggerConfig.logFileNamePrefixes)
+      if(loggerConfig.fileNamePrefixes)
       {
-         foreach(prefix; loggerConfig.logFileNamePrefixes)
+         foreach(prefix; loggerConfig.fileNamePrefixes)
          {
             if(prefix != null)
             {
@@ -2018,7 +1985,7 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
                formattedWrite(nameBuffer,
                               "%s%s.%s.%s",
                               prefix,
-                              loggerConfig.logFileNameExtension,
+                              loggerConfig.fileNameExtension,
                               time.toISOString(),
                               getpid());
                _filenames ~= std.path.join(loggerConfig.logDirectory,
@@ -2028,7 +1995,7 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
                formattedWrite(nameBuffer,
                               "%s%s",
                               prefix,
-                              loggerConfig.logFileNameExtension);
+                              loggerConfig.fileNameExtension);
                _symlinks ~= std.path.join(loggerConfig.logDirectory,
                                           nameBuffer.data);
             }
@@ -2050,7 +2017,7 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
                            _hostname,
                            username,
                            toupper(to!string(cast(Severity)severity)),
-                           loggerConfig.logFileNameExtension,
+                           loggerConfig.fileNameExtension,
                            time.toISOString(),
                            getpid());
             _filenames ~= std.path.join(loggerConfig.logDirectory,
@@ -2061,14 +2028,14 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
                            "%s.%s%s",
                            loggerConfig.name,
                            toupper(to!string(cast(Severity)severity)),
-                           loggerConfig.logFileNameExtension);
+                           loggerConfig.fileNameExtension);
             _symlinks ~= std.path.join(loggerConfig.logDirectory,
                                        nameBuffer.data);
          }
       }
    }
 
-   /// Writes a _log message to all the _log files of equal or lower severity.
+   /// Writes a _log _message to all the _log files of equal or lower severity.
    shared void log(const ref LogMessage message)
    {
       auto time = cast(DateTime) message.time;
@@ -2090,12 +2057,12 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
                                   "Log line format: %s" ~ newline,
                                   time.toISOExtString(),
                                   _hostname,
-                                  _logLineFormat);
+                                  _lineFormat);
 
                // create symlink
                symlink(basename(_filenames[i]), _symlinks[i]);
             }
-            _writers[i].writef(_internalLogLineFormat,
+            _writers[i].writef(_internalLineFormat,
                                message.threadId,
                                message.file,
                                message.line,
@@ -2169,12 +2136,12 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == 'F');
    }
 
    private size_t _bufferSize;
-   private string _logLineFormat;
-   private string _internalLogLineFormat;
+   private string _lineFormat;
+   private string _internalLineFormat;
    private dstring _severitySymbols;
    private string _hostname;
 
-   private Mutex _mutex; // rwmutex wont preserve the order
+   private Mutex _mutex;
    private string[] _filenames;
    private string[] _symlinks;
    private size_t[][] _indices;
@@ -2196,7 +2163,6 @@ Extension point for the module.
 +/
 interface Logger
 {
-
 /++
 Logs a _message.
 
@@ -2221,12 +2187,12 @@ The method must not return until all pending log operations complete.
    shared void flush();
 
    /++
-      Log message constructed by $(D std.log) and passed to $(D Logger) for
+      Log message constructed by $(D std.log) and passed to the $(D Logger) for
       recording.
     +/
    public static struct LogMessage
    {
-      /// Name of source file that created the log message.
+      /// Name of the source _file that created the log message.
       string file;
 
       /// Line number in the source file that created the log message.
@@ -2235,10 +2201,10 @@ The method must not return until all pending log operations complete.
       /// Severity of the log message.
       Severity severity;
 
-      /// Thread that created that the log message.
+      /// Thread that created the log message.
       int threadId;
 
-      /// User defined message.
+      /// User defined _message.
       char[] message;
 
       /// Time when the log message was created.
@@ -2264,8 +2230,8 @@ unittest
 The first version of this function returns true once _every n times it is called
 at a specific call site; otherwise it returns false.
 
-The second version of this function return true only after n unit of time as
-after the previous call from a specific call site; otherwise it returns false.
+The second version of this function return true only after n unit of time has
+passed after the previous call from a specific call site returned true; otherwise it returns false. The first call returns true.
 
 Example:
 ---
@@ -2283,26 +2249,29 @@ assert(secondCounter == 4);
 ---
 The code above executes without asserting.
 +/
-bool every(string file = __FILE__, int line = __LINE__)(uint n)
+Rich!bool every(string file = __FILE__, int line = __LINE__)(uint n)
 {
    static uint counter;
    if(++counter > n) counter -= n;
 
-   return counter == 1;
+   Rich!bool result = { counter == 1, "every(" ~ to!string(n) ~ ")" };
+   return result;
 }
 /// ditto
-bool every(string file = __FILE__, int line = __LINE__)(Duration n)
+Rich!bool every(string file = __FILE__, int line = __LINE__)(Duration n)
 {
    static long lastTime;
    auto currentTime = Clock.currTime.stdTime;
+   auto val = false;
 
    if(lastTime == 0 || currentTime - lastTime >= n.total!"hnsecs")
    {
       lastTime = currentTime;
-      return true;
+      val = true;
    }
 
-   return false;
+   Rich!bool result = { val, "every(" ~ to!string(n) ~ ")" };
+   return result;
 }
 
 unittest
@@ -2342,17 +2311,19 @@ assert(secondCounter == 3); // 0 + 1 + 2
 ---
 The code above executes without asserting.
 +/
-bool first(string file = __FILE__, int line = __LINE__)(uint n = 1)
+Rich!bool first(string file = __FILE__, int line = __LINE__)(uint n = 1)
 {
    static uint counter;
+   auto val = true;
 
-   if(counter >= n) return false;
-   ++counter;
+   if(counter >= n) val = false;
+   else ++counter;
 
-   return true;
+   Rich!bool result = { val, "first(" ~ to!string(n) ~ ")" };
+   return result;
 }
 /// ditto
-bool first(string file = __FILE__, int line = __LINE__)(Duration n)
+Rich!bool first(string file = __FILE__, int line = __LINE__)(Duration n)
 {
    static long firstTime;
    static bool expired;
@@ -2360,18 +2331,15 @@ bool first(string file = __FILE__, int line = __LINE__)(Duration n)
    firstTime = firstTime ? firstTime : Clock.currTime.stdTime;
 
    /* we don't support the value of n changing; once false it will always be
-    * false
-    */
-   if(expired) return false;
-
-   auto currentTime = Clock.currTime.stdTime;
-   if(currentTime - firstTime >= n.total!"hnsecs")
+      false */
+   if(!expired)
    {
-      expired = true;
-      return false;
+      auto currentTime = Clock.currTime.stdTime;
+      if(currentTime - firstTime >= n.total!"hnsecs") expired = true;
    }
 
-   return true;
+   Rich!bool result = { !expired, "first(" ~ to!string(n) ~ ")" };
+   return result;
 }
 
 unittest
@@ -2411,17 +2379,19 @@ assert(secondCounter == 24); // 7 + 8 + 9
 ---
 The code above executes without asserting.
 +/
-bool after(string file = __FILE__, int line = __LINE__)(uint n)
+Rich!bool after(string file = __FILE__, int line = __LINE__)(uint n)
 {
    static uint counter;
+   auto val = false;
 
-   if(counter >= n) return true;
-   ++counter;
+   if(counter >= n) val = true;
+   else ++counter;
 
-   return false;
+   Rich!bool result = { val, "after(" ~ to!string(n) ~ ")" };
+   return result;
 }
 /// ditto
-bool after(string file = __FILE__, int line = __LINE__)(Duration n)
+Rich!bool after(string file = __FILE__, int line = __LINE__)(Duration n)
 {
    static long firstTime;
    static bool expired;
@@ -2429,15 +2399,14 @@ bool after(string file = __FILE__, int line = __LINE__)(Duration n)
    firstTime = firstTime ? firstTime : Clock.currTime.stdTime;
 
    // we don't support the value of n changing; once true will always be true
-   if(expired) return true;
-
-   auto currentTime = Clock.currTime.stdTime;
-   if(currentTime - firstTime >= n.total!"hnsecs")
+   if(!expired)
    {
-      return expired = true;
+      auto currentTime = Clock.currTime.stdTime;
+      if(currentTime - firstTime >= n.total!"hnsecs") expired = true;
    }
 
-   return false;
+   Rich!bool result = { expired, "after(" ~ to!string(n) ~ ")" };
+   return result;
 }
 
 unittest
@@ -2465,8 +2434,24 @@ unittest
 }
 
 /++
-   Rich data
- +/
+Rich data type
+
+Defines a data type for $(D bool) which behaves just like a $(D bool) but
+support the pretty printing and analysis of why the variable got its value.
+
+The rich template support both binary (e.g. $(D ==), $(D >), etc) and unary
+($(D !)) operations. For binary operations the call $(D rich!"op"(a, b)) is
+translated to $(D a op b). For the unary operation the call $(D rich!"!"(a)) is
+translated to $(D !a). The supported operations are: $(D ==), $(D !=), $(D >),
+$(D >=), $(D <), $(D <=), $(D &&), $(D ||) and $(D !).
+   
+Example:
+---
+auto value = rich!"=="(1, 1);
+assert(value == true);
+assert(value.reason == "true = (1 == 1)");
+---
++/
 template rich(string exp)
    if(isBinaryOp(exp))
 {
@@ -2565,7 +2550,6 @@ static this()
 
 shared static this()
 {
-   LogFilter._noopLogFilter = new LogFilter;
 
    auto args = Runtime.args;
 
@@ -2586,8 +2570,6 @@ private LogFilter _critical;
 private LogFilter _error;
 private LogFilter _warning;
 private LogFilter _info;
-
-__gshared Configuration config;
 
 version(unittest)
 {
