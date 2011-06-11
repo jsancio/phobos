@@ -323,11 +323,7 @@ final class LogFilter
       _privateBuffer = privateBuffer;
 
       _message.severity = severity;
-      // XXX remove this when druntime is fixed.
-      static if(__traits(hasMember, Thread, "threadId"))
-      {
-         _message.threadId = Thread.getThis.threadId;
-      }
+      _message.threadId = Thread.getThis.threadId;
    }
 
    this() {}
@@ -2202,7 +2198,7 @@ The method must not return until all pending log operations complete.
       Severity severity;
 
       /// Thread that created the log message.
-      int threadId;
+      Thread.ThreadAddr threadId;
 
       /// User defined _message.
       char[] message;
