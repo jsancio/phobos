@@ -94,7 +94,11 @@ import std.algorithm;
 import std.functional;
 import std.file;
 
-version(Posix)
+version(Windows)
+{
+   import core.sys.windows.windows;
+}
+else version(Posix)
 {
    import core.sys.posix.unistd;
    import core.sys.posix.sys.utsname;
@@ -695,7 +699,7 @@ unittest
    assert(testConfig.matchesVerboseFilter("file", 3));
 
    // assert vmodule entries
-   assert(testConfig.matchesVerboseFilter("std/logging.d", 2));
+   assert(testConfig.matchesVerboseFilter("std" ~ sep ~ "logging.d", 2));
    assert(testConfig.matchesVerboseFilter("module.d", 0));
 
    // === test changing the command line flags ===
@@ -732,7 +736,7 @@ unittest
    assert(testConfig.matchesVerboseFilter("file", 4));
 
    // assert vmodule entries
-   assert(testConfig.matchesVerboseFilter("std/log.d", 2));
+   assert(testConfig.matchesVerboseFilter("std" ~ sep ~ "log.d", 2));
    assert(testConfig.matchesVerboseFilter("unittest.d", 0));
 
    // reset the defaults
@@ -912,22 +916,22 @@ final class Configuration
       assert(!testConfig.matchesVerboseFilter("amodule", 1));
 
       // Test *
-      assert(testConfig.matchesVerboseFilter("package/another", 3));
-      assert(testConfig.matchesVerboseFilter("package/another.d", 3));
-      assert(!testConfig.matchesVerboseFilter("package/dontknow", 3));
+      assert(testConfig.matchesVerboseFilter("package" ~ sep ~ "another", 3));
+      assert(testConfig.matchesVerboseFilter("package" ~ sep ~ "another.d", 3));
+      assert(!testConfig.matchesVerboseFilter("package" ~ sep ~ "dontknow", 3));
 
       assert(testConfig.matchesVerboseFilter("evenmore", 2));
       assert(testConfig.matchesVerboseFilter("evenmore.d", 2));
-      assert(!testConfig.matchesVerboseFilter("package/evenmore.d", 2));
+      assert(!testConfig.matchesVerboseFilter("package"~sep~"evenmore.d", 2));
 
       // Test ?
       assert(testConfig.matchesVerboseFilter("cats.d", 4));
       assert(!testConfig.matchesVerboseFilter("cat", 4));
 
       // Test * and ?
-      assert(testConfig.matchesVerboseFilter("package/dogs.d", 1));
-      assert(!testConfig.matchesVerboseFilter("package/doggies.d", 1));
-      assert(!testConfig.matchesVerboseFilter("package/horse", 1));
+      assert(testConfig.matchesVerboseFilter("package" ~ sep ~ "dogs.d", 1));
+      assert(!testConfig.matchesVerboseFilter("package"~sep~"doggies.d", 1));
+      assert(!testConfig.matchesVerboseFilter("package" ~ sep ~ "horse", 1));
 
       // Test that it can match any of the entries
       assert(testConfig.matchesVerboseFilter("evenmore.d", 10));
@@ -1234,12 +1238,12 @@ unittest
    message.severity = Severity.info;
 
    loggerConfig.alsoLogToStderr = false;
-   loggerConfig.logDirectory = "/dir";
+   loggerConfig.logDirectory = "dir";
    logger = new shared(FileLogger)(loggerConfig);
    logger.log(message);
    foreach(key, ref data; TestWriter.writers)
    {
-      if(startsWith(key, "/dir/") && data.lines.length == 2) ++passed;
+      if(startsWith(key, "dir" ~ sep) && data.lines.length == 2) ++passed;
       else assert(data.lines.length == 0);
    }
    assert(passed == 1);
@@ -1320,7 +1324,7 @@ class FileLogger : Logger
       auto args = [name,
                    "--" ~ Configuration.logToStderrFlag,
                    "--" ~ Configuration.stderrThresholdFlag, "fatal",
-                   "--" ~ Configuration.logDirectoryFlag, "/tmp",
+                   "--" ~ Configuration.logDirectoryFlag, "tmp",
                    "--ignoredOption"];
 
       loggerConfig.parseCommandLine(args);
@@ -1331,7 +1335,7 @@ class FileLogger : Logger
       assert(loggerConfig.logToStderr);
       assert(!loggerConfig.alsoLogToStderr);
       assert(loggerConfig.stderrThreshold == Severity.fatal);
-      assert(loggerConfig.logDirectory == "/tmp");
+      assert(loggerConfig.logDirectory == "tmp");
 
       // test alsoLogToStderr
       args = [name, "--" ~ Configuration.alsoLogToStderrFlag];
@@ -1394,14 +1398,14 @@ class FileLogger : Logger
       loggerConfig.logToStderr = false;
       loggerConfig.alsoLogToStderr = false;
       loggerConfig.stderrThreshold = Severity.info;
-      loggerConfig.logDirectory = "/tmp";
+      loggerConfig.logDirectory = "tmp";
 
       assertThrown(loggerConfig.parseCommandLine(args));
 
       assert(loggerConfig.logToStderr == false);
       assert(loggerConfig.alsoLogToStderr == false);
       assert(loggerConfig.stderrThreshold == Severity.info);
-      assert(loggerConfig.logDirectory = "/tmp");
+      assert(loggerConfig.logDirectory = "tmp");
    }
 
    /++
@@ -2101,7 +2105,8 @@ assert(loggerConfig.severitySymbols[Severity.fatal] == '1');
       else version(Windows)
       {
          char[MAX_COMPUTERNAME_LENGTH + 1] buf;
-         if(GetComputerNameA(buf.ptr, buf.length) == 0)
+         auto length = buf.length;
+         if(GetComputerNameA(buf.ptr, &length) != 0)
          {
             name = to!string(buf.ptr);
          }
