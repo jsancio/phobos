@@ -61,7 +61,6 @@ void main(string[] args)
 
 BUGS:
 $(UL
-   $(LI Not tested on Windows.)
    $(LI Doesn't work with the standard druntime. Changes to druntime where made
         to provide the required functionality.))
 
