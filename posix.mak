@@ -53,7 +53,7 @@ ROOT = $(ROOT_OF_THEM_ALL)/$(OS)/$(BUILD)/$(MODEL)
 DOCSRC = ../d-programming-language.org
 WEBSITE_DIR = ../web
 DOC_OUTPUT_DIR = $(WEBSITE_DIR)/phobos-prerelease
-SRC_DOCUMENTABLES = index.d $(addsuffix .d,$(STD_MODULES) $(EXTRA_DOCUMENTABLES))
+SRC_DOCUMENTABLES = index.d $(addsuffix .d,$(STD_MODULES) $(STD_NET_MODULES) $(EXTRA_DOCUMENTABLES))
 STDDOC = $(DOCSRC)/std.ddoc
 DDOCFLAGS=-m$(MODEL) -d -c -o- -version=StdDdoc $(STDDOC) -I$(DRUNTIME_PATH)/import $(DMDEXTRAFLAGS)
 
@@ -162,7 +162,7 @@ STD_MODULES = $(addprefix std/, algorithm array base64 bigint bitmanip	\
         stream string syserror system traits typecons typetuple uni		\
         uri utf variant xml zip zlib)
 
-STD_NET_MODULES = $(addprefix std/net/, isemail)
+STD_NET_MODULES = $(addprefix std/net/, isemail socket)
 
 # Other D modules that aren't under std/
 EXTRA_DOCUMENTABLES = $(addprefix etc/c/,curl zlib)
@@ -187,8 +187,9 @@ D_MODULES = crc32 $(STD_MODULES) $(EXTRA_MODULES) $(STD_NET_MODULES)
 # Add the .d suffix to the module names
 D_FILES = $(addsuffix .d,$(D_MODULES))
 # Aggregate all D modules over all OSs (this is for the zip file)
-ALL_D_FILES = $(addsuffix .d,crc32 $(STD_MODULES) $(EXTRA_MODULES)	\
-$(EXTRA_MODULES_LINUX) $(EXTRA_MODULES_OSX) $(EXTRA_MODULES_FREEBSD) $(EXTRA_MODULES_WIN32))
+ALL_D_FILES = $(addsuffix .d,crc32 $(STD_MODULES) $(STD_NET_MODULES) \
+				  $(EXTRA_MODULES) $(EXTRA_MODULES_LINUX) $(EXTRA_MODULES_OSX) \
+				  $(EXTRA_MODULES_FREEBSD) $(EXTRA_MODULES_WIN32))
 
 # C files to be part of the build
 C_MODULES = $(addprefix etc/c/zlib/, adler32 compress crc32 deflate	\
@@ -297,6 +298,9 @@ $(DOC_OUTPUT_DIR)/. :
 	mkdir -p $@
 
 $(DOC_OUTPUT_DIR)/std_%.html : std/%.d $(STDDOC)
+	$(DDOC) $(DDOCFLAGS) -Df$@ $<
+
+$(DOC_OUTPUT_DIR)/std_net_%.html : std/net/%.d $(STDDOC)
 	$(DDOC) $(DDOCFLAGS) -Df$@ $<
 
 $(DOC_OUTPUT_DIR)/std_c_%.html : std/c/%.d $(STDDOC)
