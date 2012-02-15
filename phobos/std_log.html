@@ -2,7 +2,6 @@
    "http://www.w3.org/TR/html4/loose.dtd">
 <html lang='en'>
 
-
 <!--
 	Copyright (c) 1999-2010 by Digital Mars
 	All Rights Reserved Written by Walter Bright
@@ -208,14 +207,14 @@ Implements an application level logging mechanism.
 <p></p>
 The std.<a name="log"></a><span class="ddoc_psymbol">log</span> module defines a set of functions useful for many common logging
 tasks. Five logging severity levels are defined. In the order of severity they
-are <span class="d_inlinecode">info</span>, <span class="d_inlinecode">warning</span>, <span class="d_inlinecode">error</span>, <span class="d_inlinecode">critical</span> and <span class="d_inlinecode">fatal</span>. Verbose
-messages are logged using the <span class="d_inlinecode">vlog</span> template.
+are <a href="#info"><span class="d_inlinecode">info</span></a>, <a href="#warning"><span class="d_inlinecode">warning</span></a>, <a href="#error"><span class="d_inlinecode">error</span></a>, <a href="#critical"><span class="d_inlinecode">critical</span></a> and
+<a href="#fatal"><span class="d_inlinecode">fatal</span></a>. Verbose messages are logged using the <a href="#vlog"><span class="d_inlinecode">vlog</span></a> template.
 <p></p>
 
 By default std.<a name="log"></a><span class="ddoc_psymbol">log</span> will configure itself using the command line arguments
 passed to the process and using the process's environment variables. For a list
 of the default command line options, environment variables and their meaning,
-see <span class="d_inlinecode">Configuration</span> and <span class="d_inlinecode">FileLogger.Configuration</span>.
+see <a href="#Configuration"><span class="d_inlinecode">Configuration</span></a> and <a href="#FileLogger.Configuration"><span class="d_inlinecode">FileLogger.Configuration</span></a>.
 
 <p></p>
 <b>Example:</b><br>
@@ -223,37 +222,37 @@ see <span class="d_inlinecode">Configuration</span> and <span class="d_inlinecod
 
 <span class="d_keyword">void</span> main(string[] args)
 {
-   info(<span class="d_string">"You passed %s argument(s)"</span>, args.length - 1);
-   info.when(args.length &gt; 1).write(<span class="d_string">"Arguments: "</span>, args[1 .. $]);
+    info(<span class="d_string">"You passed %s argument(s)"</span>, args.length - 1);
+    info.when(args.length &gt; 1).write(<span class="d_string">"Arguments: "</span>, args[1 .. $]);
 
-   warning(<span class="d_string">"This is a warning message."</span>);
-   error(<span class="d_string">"This is an error message!"</span>);
-   dfatal(<span class="d_string">"This is a debug fatal message"</span>);
+    warning(<span class="d_string">"This is a warning message."</span>);
+    error(<span class="d_string">"This is an error message!"</span>);
+    dfatal(<span class="d_string">"This is a debug fatal message"</span>);
 
-   vlog(1)(<span class="d_string">"Verbosity 1 message"</span>);
-   vlog(2)(<span class="d_string">"Verbosity 2 message"</span>);
+    vlog(1)(<span class="d_string">"Verbosity 1 message"</span>);
+    vlog(2)(<span class="d_string">"Verbosity 2 message"</span>);
 
-   <span class="d_keyword">foreach</span> (i; 0 .. 10)
-   {
-      info.when(every(9))(<span class="d_string">"Every nine"</span>);
+    <span class="d_keyword">foreach</span> (i; 0 .. 10)
+    {
+        info.when(every(9))(<span class="d_string">"Every nine"</span>);
 
-      <span class="d_keyword">if</span>(info.willLog)
-      {
-         <span class="d_keyword">auto</span> message = <span class="d_string">"Cool message"</span>;
-         <span class="d_comment">// perform some complex operation
-</span>         <span class="d_comment">// ...
-</span>         info(message);
-      }
-   }
+        <span class="d_keyword">if</span>(info.willLog)
+        {
+            <span class="d_keyword">auto</span> message = <span class="d_string">"Cool message"</span>;
+            <span class="d_comment">// perform some complex operation
+</span>            <span class="d_comment">// ...
+</span>            info(message);
+        }
+    }
 
-   <span class="d_keyword">try</span> critical(<span class="d_string">"Critical message"</span>);
-   <span class="d_keyword">catch</span>(CriticalException e)
-   {
-      <span class="d_comment">// shutdown application...
-</span>   }
+    <span class="d_keyword">try</span> critical(<span class="d_string">"Critical message"</span>);
+    <span class="d_keyword">catch</span>(CriticalException e)
+    {
+        <span class="d_comment">// shutdown application...
+</span>    }
 
-   fatal(<span class="d_string">"This is a fatal message!!!"</span>);
-   <span class="d_keyword">assert</span>(<span class="d_keyword">false</span>, <span class="d_string">"Never reached"</span>);
+    fatal(<span class="d_string">"This is a fatal message!!!"</span>);
+    <span class="d_keyword">assert</span>(<span class="d_keyword">false</span>, <span class="d_string">"Never reached"</span>);
 }
 </pre>
 
@@ -274,7 +273,7 @@ see <span class="d_inlinecode">Configuration</span> and <span class="d_inlinecod
 <br>alias <a name="warning"></a><span class="ddoc_psymbol">warning</span>;
 <br>alias <a name="info"></a><span class="ddoc_psymbol">info</span>;
 </dt>
-<dd>Maps to the <span class="d_inlinecode">LogFilter</span> for the specified severity.
+<dd>Maps to the <a href="#LogFilter"><span class="d_inlinecode">LogFilter</span></a> for the specified severity.
 <p></p>
 <b>Example:</b><br>
 <pre class="d_code">info(<span class="d_string">"Info severity message"</span>);
@@ -285,43 +284,43 @@ dfatal(<span class="d_string">"Fatal message in debug mode and critical message 
 fatal(<span class="d_string">"Fatal severity message"</span>);
 </pre>
 
-<center><table cellspacing=0 cellpadding=5 class=book><caption>Description of supported severities.</caption>   <tr><th>Severity</th> <th>Description</th></tr>
-   <tr><td valign=top><span class="d_inlinecode">fatal</span></td>
-        <td valign=top>Logs a fatal severity message. Fatal log messages terminate the
-             application after the message is persisted. Fatal log message
-             cannot be disable at compile time or at run time.</td></tr>
-   <tr><td valign=top><span class="d_inlinecode">dfatal</span></td>
-        <td valign=top>Logs a debug fatal message. Debug fatal log messages log at
-             fatal severity in debug mode and log at critical severity in
-             release mode. See fatal and critical severity levels for a
-             description of their behavior.</td></tr>
-   <tr><td valign=top><span class="d_inlinecode">critical</span></td>
-        <td valign=top>Logs a critical severity message. Critical log messages throw an
-             exception after the message is persisted. Critical log messages
-             cannot be disable at compile time or at run time.</td></tr>
-   <tr><td valign=top><span class="d_inlinecode">error</span></td>
-        <td valign=top>Logs an error severity message. Error log messages are disable
-             at compiled time by setting the version to <i>strip_log_error</i>.
-             Error log messages are disable at run time by setting the
-             minimun severity to <span class="d_inlinecode">Level.fatal</span> or <span class="d_inlinecode">Level.critical</span> in
-             <span class="d_inlinecode">Configuration</span>. Disabling error log messages at compile time
-             or at run time also disables lower severity messages, e.g. warning
-             and info.</td></tr>
-   <tr><td valign=top><span class="d_inlinecode">warning</span></td>
-        <td valign=top>Logs a warning severity message. Warning log messages are
-             disable at compiled time by setting the version to
-             <i>strip_log_warning</i>. Warning log messages are disable at run
-             time by setting the minimum severity to <span class="d_inlinecode">Level.error</span> in
-             <span class="d_inlinecode">Configuration</span>. Disabling warning log messages at compile
-             time or at run time also disables lower severity messages, e.g.
-             info.</td></tr>
-   <tr><td valign=top><span class="d_inlinecode">info</span></td>
-        <td valign=top>Logs a info severity message. Info log messages are disable at
-             compiled time by setting the version to <i>strip_log_info</i>. Info
-             log messages are disable at run time by setting the minimum
-             severity to <span class="d_inlinecode">Level.warning</span> in <span class="d_inlinecode">Configuration</span>. Disabling
-             info log messages at compile time or at run time also disables
-             verbose log messages.</td></tr></table></center><p></p>
+<center><table cellspacing=0 cellpadding=5 class=book><caption>Description of supported severities.</caption>    <tr><th>Severity</th> <th>Description</th></tr>
+    <tr><td valign=top><span class="d_inlinecode">fatal</span></td>
+         <td valign=top>Logs a fatal severity message. Fatal log messages terminate the
+              application after the message is persisted. Fatal log message
+              cannot be disable at compile time or at run time.</td></tr>
+    <tr><td valign=top><span class="d_inlinecode">dfatal</span></td>
+         <td valign=top>Logs a debug fatal message. Debug fatal log messages log at
+              fatal severity in debug mode and log at critical severity in
+              release mode. See fatal and critical severity levels for a
+              description of their behavior.</td></tr>
+    <tr><td valign=top><span class="d_inlinecode">critical</span></td>
+         <td valign=top>Logs a critical severity message. Critical log messages throw an
+              exception after the message is persisted. Critical log messages
+              cannot be disable at compile time or at run time.</td></tr>
+    <tr><td valign=top><span class="d_inlinecode">error</span></td>
+         <td valign=top>Logs an error severity message. Error log messages are disable
+              at compiled time by setting the version to <i>strip_log_error</i>.
+              Error log messages are disable at run time by setting the
+              minimun severity to <a href="#Severity.fatal"><span class="d_inlinecode">Severity.fatal</span></a> or
+              <a href="#Severity.critical"><span class="d_inlinecode">Severity.critical</span></a> in <a href="#Configuration"><span class="d_inlinecode">Configuration</span></a>. Disabling
+              error log messages at compile time or at run time also disables
+              lower severity messages, e.g. warning and info.</td></tr>
+    <tr><td valign=top><span class="d_inlinecode">warning</span></td>
+         <td valign=top>Logs a warning severity message. Warning log messages are
+              disable at compiled time by setting the version to
+              <i>strip_log_warning</i>. Warning log messages are disable at run
+              time by setting the minimum severity to <a href="#Severity.error"><span class="d_inlinecode">Severity.error</span></a> in
+              <a href="#Configuration"><span class="d_inlinecode">Configuration</span></a>. Disabling warning log messages at compile
+              time or at run time also disables lower severity messages, e.g.
+              info.</td></tr>
+    <tr><td valign=top><span class="d_inlinecode">info</span></td>
+         <td valign=top>Logs a info severity message. Info log messages are disable at
+              compiled time by setting the version to <i>strip_log_info</i>. Info
+              log messages are disable at run time by setting the minimum
+              severity to <a href="#Severity.warning"><span class="d_inlinecode">Severity.warning</span></a> in <a href="#Configuration"><span class="d_inlinecode">Configuration</span></a>.
+              Disabling info log messages at compile time or at run time also
+              disables verbose log messages.</td></tr></table></center><p></p>
 
 </dd>
 <dt class="d_decl">auto <a name="vlog"></a><span class="ddoc_psymbol">vlog</span>(string file = __FILE__)(int <i>level</i>);
@@ -329,8 +328,8 @@ fatal(<span class="d_string">"Fatal severity message"</span>);
 <dd>Verbose log messages are log at the info severity level. To disable them at
 compile time set the version to <i>strip_log_info</i> which also disables all
 messages of info severity at compile time. To enable verbose log messages at
-run time use the the maximum verbose level property and the verbose filter
-property in <span class="d_inlinecode">Configuration</span>.
+run time use the <a href="#Configuration.maxVerboseLevel"><span class="d_inlinecode">Configuration.maxVerboseLevel</span></a> property and the
+<a href="#Configuration.verboseFilter"><span class="d_inlinecode">Configuration.verboseFilter</span></a> property.
 <p></p>
 <b>Example:</b><br>
 <pre class="d_code"><span class="d_psymbol">vlog</span>(1)(<span class="d_string">"A verbose 1 message"</span>);
@@ -341,9 +340,9 @@ property in <span class="d_inlinecode">Configuration</span>.
 <dt class="d_decl">class <a name="LogFilter"></a><span class="ddoc_psymbol">LogFilter</span>;
 </dt>
 <dd>Conditionally records a log message by checking the severity level and any
-user defined condition. This is the type alised by the <span class="d_inlinecode">log</span> and <span class="d_inlinecode">vlog</span>
-template and the type of the aliases <span class="d_inlinecode">fata</span>, <span class="d_inlinecode">dfata</span>, <span class="d_inlinecode">critical</span>,
-<span class="d_inlinecode">error</span>, <span class="d_inlinecode">warning</span> and <span class="d_inlinecode">info</span>.
+user defined condition. Instances of <a name="LogFilter"></a><span class="ddoc_psymbol">LogFilter</span> are alised by the <a href="#log"><span class="d_inlinecode">log</span></a> and
+<a href="#vlog"><span class="d_inlinecode">vlog</span></a> template and the <a href="#fatal"><span class="d_inlinecode">fatal</span></a>, <a href="#dfatal"><span class="d_inlinecode">dfatal</span></a>, <a href="#critical"><span class="d_inlinecode">critical</span></a>,
+<a href="#error"><span class="d_inlinecode">error</span></a>, <a href="#warning"><span class="d_inlinecode">warning</span></a> and <a href="#info"><span class="d_inlinecode">info</span></a> aliases.
 <p></p>
 <b>Examples:</b><br><pre class="d_code">error(<span class="d_string">"Log an %s message!"</span>, Severity.error);
 error.write(<span class="d_string">"Log an "</span>, Severity.error, <span class="d_string">" message!"</span>);
@@ -354,13 +353,13 @@ Logs a message if the specified severity level is enable.
 
 <pre class="d_code"><span class="d_keyword">void</span> coolFunction(Object object)
 {
-   fatal.when(object <span class="d_keyword">is</span> <span class="d_keyword">null</span>)(<span class="d_string">"I don't like null objects!"</span>);
-   <span class="d_comment">// ...
+    fatal.when(object <span class="d_keyword">is</span> <span class="d_keyword">null</span>)(<span class="d_string">"I don't like null objects!"</span>);
+    <span class="d_comment">// ...
 </span>}
 
 <span class="d_keyword">foreach</span>(i; 0 .. 10)
 {
-   info.when(first())(<span class="d_string">"Only log this one time per thread run"</span>);
+    info.when(first())(<span class="d_string">"Only log this one time per thread run"</span>);
 }
 </pre>
 Logs a message if the specified severity level is enable and all the user
@@ -369,8 +368,8 @@ defined condition are <b>true</b>.
 
 <pre class="d_code"><span class="d_keyword">void</span> removeDirectory(string dir = <span class="d_string">"/tmp/log"</span>)
 {
-   info.when(rich!<span class="d_string">"!="</span>(dir, <span class="d_string">"/tmp/log"</span>))(<span class="d_string">"Trying to remove dir"</span>);
-   <span class="d_comment">// ...
+    info.when(rich!<span class="d_string">"!="</span>(dir, <span class="d_string">"/tmp/log"</span>))(<span class="d_string">"Trying to remove dir"</span>);
+    <span class="d_comment">// ...
 </span>}
 </pre>
 Logs a rich message if the specified severity level is enable and all the user
@@ -383,10 +382,10 @@ defined condition are <b>true</b>.<p></p>
 <b>Example:</b><br>
 <pre class="d_code"><span class="d_keyword">if</span>(error.<span class="d_psymbol">willLog</span>)
 {
-   string message;
-   <span class="d_comment">// Perform some computation
-</span>   <span class="d_comment">// ...
-</span>   error(message);
+    string message;
+    <span class="d_comment">// Perform some computation
+</span>    <span class="d_comment">// ...
+</span>    error(message);
 }
 </pre>
 <p></p>
@@ -395,8 +394,9 @@ defined condition are <b>true</b>.<p></p>
 <dt class="d_decl">LogFilter <a name="when"></a><span class="ddoc_psymbol">when</span>(lazy bool <i>now</i>);
 </dt>
 <dd>Returns this object if the parameter <i>now</i> evaluates to <b>true</b> and
-      <span class="d_inlinecode">willLog</span> returns <b>true</b>. Note: The <i>now</i> parameter is only evaluated if
-      <span class="d_inlinecode">willLog</span> returns <b>true</b>.
+       <a href="#willLog"><span class="d_inlinecode">willLog</span></a> returns <b>true</b>. Otherwise, it returns an object that will
+       not log messages. Note: The <i>now</i> parameter is only evaluated if
+       <a href="#willLog"><span class="d_inlinecode">willLog</span></a> returns <b>true</b>.
 <p></p>
 <b>Example:</b><br>
 <pre class="d_code"><span class="d_keyword">foreach</span>(i; 0 .. 10)
@@ -410,10 +410,10 @@ defined condition are <b>true</b>.<p></p>
 </dd>
 <dt class="d_decl">LogFilter <a name="when"></a><span class="ddoc_psymbol">when</span>(lazy Rich!(bool) <i>now</i>);
 </dt>
-<dd>Returns this object if the parameter <i>now</i> evaluates to <b>true</b> and
-      <span class="d_inlinecode">willLog</span> returns <b>true</b>. It also appends the log message with a reason
-      as to why it is <b>true</b>. Note: The <i>now</i> parameter is only evaluated if
-      <span class="d_inlinecode">willLog</span> return <b>true</b>.
+<dd>Returns this object and appends the log message with a reason if the
+       parameter <i>now</i> evaluates to <b>true</b> and <a href="#willLog"><span class="d_inlinecode">willLog</span></a> returns <b>true</b>.
+       Otherwise, it returns an object that will not log messages. Note: The <i>now</i>
+       parameter is only evaluated if <a href="#willLog"><span class="d_inlinecode">willLog</span></a> return <b>true</b>.
 <p></p>
 <b>Example:</b><br>
 <pre class="d_code"><span class="d_keyword">foreach</span>(i; 0 .. 10)
@@ -428,7 +428,7 @@ defined condition are <b>true</b>.<p></p>
 <dt class="d_decl">void <a name="write"></a><span class="ddoc_psymbol">write</span>(string file = __FILE__, int line = __LINE__, T...)(lazy T <i>args</i>);
 </dt>
 <dd>Concatenates all the arguments and logs them. Note: The parameters are
-      only evaluated if <span class="d_inlinecode">willLog</span> returns <b>true</b>.
+       only evaluated if <a href="#willLog"><span class="d_inlinecode">willLog</span></a> returns <b>true</b>.
 <p></p>
 <b>Example:</b><br>
 <pre class="d_code"><span class="d_keyword">auto</span> pi = 3.14159265;
@@ -442,9 +442,9 @@ info.<span class="d_psymbol">write</span>(<span class="d_string">"The value of p
 <br>alias <a name="opCall"></a><span class="ddoc_psymbol">opCall</span>;
 </dt>
 <dd>Formats the parameters args given the format string fmt and
-      logs them. Note: The parameters are only evaluated if a message can be
-      logged. For a description of the format string see
-      <span class="d_inlinecode">std.format.formattedWrite</span>.
+       logs them. Note: The parameters are only evaluated if <a href="#willLog"><span class="d_inlinecode">willLog</span></a>
+       evaluates to <b>true</b>. For a description of the format string see
+       <a href="std_format.html#formattedWrite"><span class="d_inlinecode">std.format.formattedWrite</span></a>.
 <p></p>
 <b>Example:</b><br>
 <pre class="d_code"><span class="d_keyword">auto</span> goldenRatio = 1.61803399;
@@ -462,7 +462,8 @@ vlog(1).<span class="d_psymbol">format</span>(<span class="d_string">"The number
 <dt class="d_decl">enum <a name="Severity"></a><span class="ddoc_psymbol">Severity</span>;
 </dt>
 <dd>Defines the severity levels supported by the logging library. Should be used
-  in conjuntion with the log template. See <span class="d_inlinecode">log</span><p></p>
+in conjuntion with the log template. See <a href="#log"><span class="d_inlinecode">log</span></a> for an explanation of
+their semantic.<p></p>
 
 <dl><dt class="d_decl"><a name="fatal"></a><span class="ddoc_psymbol">fatal</span><br><a name="critical"></a><span class="ddoc_psymbol">critical</span><br><a name="error"></a><span class="ddoc_psymbol">error</span><br><a name="warning"></a><span class="ddoc_psymbol">warning</span><br><a name="info"></a><span class="ddoc_psymbol">info</span></dt>
 <dd><p></p>
@@ -482,44 +483,63 @@ not wanted.<p></p>
 <dd>Modifies the configuration object based on the passed parameter.
 <p></p>
 The function processes every entry in <i>commandLine</i> looking for valid
-      command line options. All of the valid options are enumerated in the
-      fields of this structure that end in 'Flag', e.g. minSeverityFlag.
-      When a valid command line option is found its value is stored in the
-      mapping object's property and it is removed from <i>commandLine</i>. For any
-      property not set explicitly its default value is used. Here is a list of
-      all the flags and how they map to the object's property:
+       command line options. All of the valid options are enumerated in the
+       fields of this structure that end in 'Flag', e.g. minSeverityFlag.
+       When a valid command line option is found its value is stored in the
+       mapping object's property and it is removed from <i>commandLine</i>. For any
+       property not set explicitly the value used before this call is used. Here
+       is a list of all the flags and how they map to the object's property:
 <p></p>
 
-      <ul>        <li><span class="d_inlinecode">minSeverityFlag</span> maps to <span class="d_inlinecode">minSeverity</span></li>
-         <li><span class="d_inlinecode">verboseFilterFlag</span> maps to <span class="d_inlinecode">verboseFilter</span></li>
-         <li><span class="d_inlinecode">maxVerboseLevelFlag</span> maps to <span class="d_inlinecode">maxVerboseLevel</span></li></ul>
+       <ul>         <li><span class="d_inlinecode">minSeverityFlag</span> maps to <span class="d_inlinecode">minSeverity</span></li>
+          <li><span class="d_inlinecode">verboseFilterFlag</span> maps to <span class="d_inlinecode">verboseFilter</span></li>
+          <li><span class="d_inlinecode">maxVerboseLevelFlag</span> maps to <span class="d_inlinecode">maxVerboseLevel</span></li></ul>
+
+<p></p>
+<b>Example:</b><br>
+<pre class="d_code"><span class="d_keyword">import</span> std.log;
+
+<span class="d_keyword">void</span> main(string[] args)
+{
+    <span class="d_comment">// Overwrite the defaults...
+</span>    config.minSeverity = Severity.info;
+    <span class="d_comment">// ...
+</span>
+    <span class="d_comment">// Parse the command line
+</span>    config.<span class="d_psymbol">parseCommandLine</span>(args);
+}
+</pre>
+       This example overrites the default for the minimum severity property and
+       later configures logging to any configuration option passed through
+       the command line.
 
 <p></p>
 <b>Note:</b><br>
 A call to this function is not required if the module will be initialized
-      using the default options.<p></p>
+       using the default options.<p></p>
 
 </dd>
 <dt class="d_decl">@property string <a name="minSeverityFlag"></a><span class="ddoc_psymbol">minSeverityFlag</span>(string <a name="minSeverityFlag"></a><span class="ddoc_psymbol">minSeverityFlag</span>);
 <br>@property string <a name="minSeverityFlag"></a><span class="ddoc_psymbol">minSeverityFlag</span>();
 </dt>
 <dd>Command line flag for setting the minimum severity level. The default
-      value is <span class="d_inlinecode">"minloglevel"</span> which at the command line is
-      <i>--minloglevel</i>.<p></p>
+       value is <span class="d_inlinecode">"minloglevel"</span> which at the command line is
+       <i>--minloglevel</i>.<p></p>
 
 </dd>
 <dt class="d_decl">@property string <a name="verboseFilterFlag"></a><span class="ddoc_psymbol">verboseFilterFlag</span>(string <a name="verboseFilterFlag"></a><span class="ddoc_psymbol">verboseFilterFlag</span>);
 <br>@property string <a name="verboseFilterFlag"></a><span class="ddoc_psymbol">verboseFilterFlag</span>();
 </dt>
 <dd>Command line flag for setting the per module verbose filter
-      configuration. The default value is <span class="d_inlinecode">"vmodule"</span> which at the command
-      line is <i>--vmodule</i>.<p></p>
+       configuration. The default value is <span class="d_inlinecode">"vmodule"</span> which at the command
+       line is <i>--vmodule</i>.<p></p>
 
 </dd>
 <dt class="d_decl">@property string <a name="maxVerboseLevelFlag"></a><span class="ddoc_psymbol">maxVerboseLevelFlag</span>(string <a name="maxVerboseLevelFlag"></a><span class="ddoc_psymbol">maxVerboseLevelFlag</span>);
+<br>@property string <a name="maxVerboseLevelFlag"></a><span class="ddoc_psymbol">maxVerboseLevelFlag</span>();
 </dt>
 <dd>Command line flag for setting the maximum verbose level. The default
-      value is <span class="d_inlinecode">"v"</span> which at the command line is <i>--v</i>.<p></p>
+       value is <span class="d_inlinecode">"v"</span> which at the command line is <i>--v</i>.<p></p>
 
 </dd>
 <dt class="d_decl">@property Severity <a name="minSeverity"></a><span class="ddoc_psymbol">minSeverity</span>(Severity <i>severity</i>);
@@ -528,10 +548,18 @@ A call to this function is not required if the module will be initialized
 <dd>Specifies the minimum severity for logging messages.
 <p></p>
 Only messages with a severity greater than or equal to the value of this
-      property are logged.
+       property are logged.
+
+<p></p>
+<b>Example:</b><br>
+<pre class="d_code">config.<span class="d_psymbol">minSeverity</span> = Severity.warning
+</pre>
+       This example will enable logging for messages with <i>severity</i>
+       <span class="d_inlinecode">Severity.fatal</span>, <span class="d_inlinecode">Severity.critical</span>, <span class="d_inlinecode">Severity.error</span> and
+       <span class="d_inlinecode">Severity.warning</span>.
 <p></p>
 
-      The default value is <span class="d_inlinecode">Severity.error</span>.<p></p>
+       The default value is <span class="d_inlinecode">Severity.error</span>.<p></p>
 
 </dd>
 <dt class="d_decl">@property int <a name="maxVerboseLevel"></a><span class="ddoc_psymbol">maxVerboseLevel</span>(int <i>level</i>);
@@ -540,12 +568,24 @@ Only messages with a severity greater than or equal to the value of this
 <dd>Specifies the maximum verbose level for logging verbose messages.
 <p></p>
 Verbose messages are logged if their verbose level is less than or equal
-      to the value of this property. This property is ignore if the module
-      logging the verbose message matches an entry specified in the property
-      for per module verbose filtering.
+       to the value of this property. This property is ignore if the module
+       logging the verbose message matches an entry specified in the property
+       for per module verbose filtering.
+
+<p></p>
+<b>Example:</b><br>
+<pre class="d_code">config.minSeverity = Severity.info;
+config.<span class="d_psymbol">maxVerboseLevel</span>(5);
+
+vlog(4)(<span class="d_string">"Log this message"</span>);
+vlog(5)(<span class="d_string">"Also log this message"</span>);
+vlog(6)(<span class="d_string">"Don't log this message"</span>);
+</pre>
+       This example will enable verbose logging for verbose message with a
+       level of 5 or less.
 <p></p>
 
-      The default value is <span class="d_inlinecode">int.min</span>.<p></p>
+       The default value is <span class="d_inlinecode">int.min</span>.<p></p>
 
 </dd>
 <dt class="d_decl">@property string <a name="verboseFilter"></a><span class="ddoc_psymbol">verboseFilter</span>(string <i>vmodule</i>);
@@ -554,52 +594,51 @@ Verbose messages are logged if their verbose level is less than or equal
 <dd>Specifies the per module verbose filter configuration.
 <p></p>
 A verbose message with level <i>x</i> gets logged at severity level info
-      if there is an entry that matches the source file, and if the verbose
-      level of that entry is greater than or equal to <i>x</i>.
+       if there is an entry that matches the source file, and if the verbose
+       level of that entry is greater than or equal to <i>x</i>.
 <p></p>
 
-      The format of the configuration string is as follow
-      <i>[pattern]=[level],...</i>, where <i>[pattern]</i> may contain any
-      character allowed in a file name and <i>[level]</i> is convertible to an
-      integer. Any <i>*</i> in <i>[pattern]</i> matches any number of characters.
-      Any <i>?</i> in <i>[pattern]</i> matches exactly one character.
+       The format of the configuration string is as follow
+       <i>[pattern]=[level],...</i>, where <i>[pattern]</i> may contain any
+       character allowed in a file name and <i>[level]</i> is convertible to an
+       integer. For an exmplanation of how <i>[pattern]</i> matches the source
+       file please see <a href="std_path.html#globMatch"><span class="d_inlinecode">std.path.globMatch</span></a>.
 <p></p>
 
-      For every <i>[pattern]=[level]</i> in the configuration string an entry is
-      created.
+       For every <i>[pattern]=[level]</i> in the configuration string an entry is
+       created.
 
 <p></p>
 <b>Example:</b><br>
 <pre class="d_code">config.<span class="d_psymbol">verboseFilter</span> = <span class="d_string">"module=2,great*=3,*test=1"</span>;
 </pre>
 
-      The code above sets a verbose logging configuration that:
-      <ul>        <li>Logs verbose 2 and lower messages from 'module{,.d}'</li>
-         <li>Logs verbose 3 and lower messages from anything starting with
-              'great'</li>
-         <li>Logs verbose 1 and lower messages from any file that ends with
-              'test{,.d}'</li></ul>
+       The code above sets a verbose logging configuration that:
+       <ul>         <li>Logs verbose 2 and lower messages from 'module{,.d}'</li>
+          <li>Logs verbose 3 and lower messages from anything starting with
+               'great'</li>
+          <li>Logs verbose 1 and lower messages from any file that ends with
+               'test{,.d}'</li></ul>
 
 <p></p>
 <b>Note:</b><br>
-If the verbose message matches the pattern part of the entry but
-      doesn't match the verbose level, then the maximum verbose level property
-      is ignored.
+If the verbose message matches the pattern part of the entry, then
+       the maximum verbose level property is ignored.
 <p></p>
 
-      E.g. In the default configuration if the command line contains <i>--v=2
-      --<i>vmodule</i>=web=1</i>.
+       For example in the default configuration if the command line contains
+       <i>--minloglevel=info --v=2 --<i>vmodule</i>=web=1</i>.
 <pre class="d_code"><span class="d_keyword">module</span> web;
 
 <span class="d_comment">// ...
 </span>
 vlog(2)(<span class="d_string">"Verbose message is not logged"</span>);
 </pre>
-      The verbose message above is not logged even though it is less than or
-      equal to 2, as specified in the command line.
+       The verbose message above is not logged even though it is less than or
+       equal to 2, as specified in the command line.
 <p></p>
 
-      The default value is <span class="d_inlinecode"><b>null</b></span>.<p></p>
+       The default value is <span class="d_inlinecode"><b>null</b></span>.<p></p>
 
 </dd>
 <dt class="d_decl">@property void function() <a name="fatalHandler"></a><span class="ddoc_psymbol">fatalHandler</span>(void function() <i>handler</i>);
@@ -607,11 +646,11 @@ vlog(2)(<span class="d_string">"Verbose message is not logged"</span>);
 <dd>Function pointer for handling log message with a severity of fatal.
 <p></p>
 This function is called by the thread trying to log a fatal message. The
-      function <i>handler</i> should not return; otherwise <span class="d_inlinecode">std.log</span> will
-      <span class="d_inlinecode">assert(<b>false</b>)</span>.
+       function <i>handler</i> should not return; otherwise <span class="d_inlinecode">std.log</span> will
+       <span class="d_inlinecode">assert(<b>false</b>)</span>.
 <p></p>
 
-      The default value is <span class="d_inlinecode">function void() {}</span>.<p></p>
+       The default value is <span class="d_inlinecode">function void() {}</span>.<p></p>
 
 </dd>
 <dt class="d_decl">@property shared(Logger) <a name="logger"></a><span class="ddoc_psymbol">logger</span>(shared(Logger) <a name="logger"></a><span class="ddoc_psymbol">logger</span>);
@@ -620,11 +659,11 @@ This function is called by the thread trying to log a fatal message. The
 <dd>Implementation of the <span class="d_inlinecode">Logger</span> interface used to persiste log messages
 <p></p>
 This property allows the caller to change and configure the backend
-      logger to a different <span class="d_inlinecode">Logger</span>. It will throw an exception if it is
-      changed after a logging call has been made.
+       logger to a different <span class="d_inlinecode">Logger</span>. It will throw an exception if it is
+       changed after a logging call has been made.
 <p></p>
 
-      The default value a <span class="d_inlinecode">FileLogger</span>.
+       The default value a <span class="d_inlinecode">FileLogger</span>.
 
 <p></p>
 <b>Example:</b><br>
@@ -642,7 +681,7 @@ This property allows the caller to change and configure the backend
    <span class="d_comment">// ...
 </span>}
 </pre>
-      This example disables writing log messages at run time.<p></p>
+       This example disables writing log messages at run time.<p></p>
 
 </dd>
 </dl>
@@ -895,7 +934,7 @@ The parameter should either by <span class="d_inlinecode"><b>null</b></span> or 
 }
 </pre>
          The example above will log every log message to one file with the
-          name (I [program].log.[datetime].[pid].<p></p>
+         name <i>[program].log.[datetime].[pid]</i>.<p></p>
 
 </dd>
 <dt class="d_decl">@property string <a name="fileNameExtension"></a><span class="ddoc_psymbol">fileNameExtension</span>(string <i>extension</i>);
