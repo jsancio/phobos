@@ -295,9 +295,10 @@ fatal(<span class="d_string">"Fatal severity message"</span>);
               release mode. See fatal and critical severity levels for a
               description of their behavior.</td></tr>
     <tr><td valign=top><span class="d_inlinecode">critical</span></td>
-         <td valign=top>Logs a critical severity message. Critical log messages throw an
-              exception after the message is persisted. Critical log messages
-              cannot be disable at compile time or at run time.</td></tr>
+         <td valign=top>Logs a critical severity message. Critical log messages throw a
+              <a href="#CriticalException"><span class="d_inlinecode">CriticalException</span></a> exception after the message is
+              persisted. Critical log messages cannot be disable at compile
+              time or at run time.</td></tr>
     <tr><td valign=top><span class="d_inlinecode">error</span></td>
          <td valign=top>Logs an error severity message. Error log messages are disable
               at compiled time by setting the version to <i>strip_log_error</i>.
@@ -346,7 +347,7 @@ user defined condition. Instances of <a name="LogFilter"></a><span class="ddoc_p
 <p></p>
 <b>Examples:</b><br><pre class="d_code">error(<span class="d_string">"Log an %s message!"</span>, Severity.error);
 error.write(<span class="d_string">"Log an "</span>, Severity.error, <span class="d_string">" message!"</span>);
-error.format(<span class="d_string">"Also logs an %s message!"</span>, Severity.error);
+error.writef(<span class="d_string">"Also logs an %s message!"</span>, Severity.error);
 </pre>
 Logs a message if the specified severity level is enable.
 <p></p>
@@ -438,7 +439,7 @@ info.<span class="d_psymbol">write</span>(<span class="d_string">"The value of p
 <p></p>
 
 </dd>
-<dt class="d_decl">void <a name="format"></a><span class="ddoc_psymbol">format</span>(string file = __FILE__, int line = __LINE__, T...)(lazy string <i>fmt</i>, lazy T <i>args</i>);
+<dt class="d_decl">void <a name="writef"></a><span class="ddoc_psymbol">writef</span>(string file = __FILE__, int line = __LINE__, T...)(lazy string <i>fmt</i>, lazy T <i>args</i>);
 <br>alias <a name="opCall"></a><span class="ddoc_psymbol">opCall</span>;
 </dt>
 <dd>Formats the parameters args given the format string fmt and
@@ -449,7 +450,7 @@ info.<span class="d_psymbol">write</span>(<span class="d_string">"The value of p
 <b>Example:</b><br>
 <pre class="d_code"><span class="d_keyword">auto</span> goldenRatio = 1.61803399;
 
-vlog(1).<span class="d_psymbol">format</span>(<span class="d_string">"The number %s is the golden ratio"</span>, goldenRatio);
+vlog(1).<span class="d_psymbol">writef</span>(<span class="d_string">"The number %s is the golden ratio"</span>, goldenRatio);
 
 <span class="d_comment">// The same as above...
 </span>vlog(1)(<span class="d_string">"The number %s is the golden ration"</span>, goldenRatio);
@@ -458,6 +459,11 @@ vlog(1).<span class="d_psymbol">format</span>(<span class="d_string">"The number
 
 </dd>
 </dl>
+</dd>
+<dt class="d_decl">class <a name="CriticalException"></a><span class="ddoc_psymbol">CriticalException</span>: object.Exception;
+</dt>
+<dd>Exception thrown when logging a critical message. See <a href="#critical"><span class="d_inlinecode">critical</span></a>.<p></p>
+
 </dd>
 <dt class="d_decl">enum <a name="Severity"></a><span class="ddoc_psymbol">Severity</span>;
 </dt>
@@ -706,62 +712,71 @@ and info but not to the log files for fatal and error.<p></p>
 <dd>Modifies the configuration object based on the passed parameter.
 <p></p>
 The function processes every entry in <i>commandLine</i> looking for valid
-         command line options. All of the valid options are enumerated in the
-         fields of this structure that end in 'Flag', e.g. logToStderrFlag.
-         When a valid command line option is found its value is stored in the
-         mapping object's property and it is removed from <i>commandLine</i>. For any
-         property not set explicitly its default value is used. Here is a list
-         of all the flags and how they map to the object's property:
+           command line options. All of the valid options are enumerated in the
+           fields of this structure that end in 'Flag', e.g. logToStderrFlag.
+           When a valid command line option is found its value is stored in the
+           mapping object's property and it is removed from <i>commandLine</i>. For any
+           property not set explicitly its default value is used. Here is a list
+           of all the flags and how they map to the object's property:
 <p></p>
 
-         <ul>           <li><span class="d_inlinecode">logToStderrFlag</span> maps to <span class="d_inlinecode">logToStderr</span></li>
-            <li><span class="d_inlinecode">alsoLogToStderrFlag</span> maps to <span class="d_inlinecode">alsoLogToStderr</span></li>
-            <li><span class="d_inlinecode">stderrThresholdFlag</span> maps to <span class="d_inlinecode">stderrThreshold</span></li>
-            <li><span class="d_inlinecode">logDirectoryFlag</span> maps to <span class="d_inlinecode">logDirectory</span></li></ul>
+           <ul>             <li><span class="d_inlinecode">logToStderrFlag</span> maps to <span class="d_inlinecode">logToStderr</span></li>
+              <li><span class="d_inlinecode">alsoLogToStderrFlag</span> maps to <span class="d_inlinecode">alsoLogToStderr</span></li>
+              <li><span class="d_inlinecode">stderrThresholdFlag</span> maps to <span class="d_inlinecode">stderrThreshold</span></li>
+              <li><span class="d_inlinecode">logDirectoryFlag</span> maps to <span class="d_inlinecode">logDirectory</span></li></ul>
 <p></p>
 
-         The <span class="d_inlinecode">name</span> property is set to the program name, i.e. the first
-         element of <i>commandLine</i>.
+           The <span class="d_inlinecode">name</span> property is set to the program name, for example the
+           first element of <i>commandLine</i>.
 
 <p></p>
 <b>Example:</b><br>
-<pre class="d_code"><span class="d_keyword">void</span> main(string[] args) {
-  <span class="d_keyword">auto</span> loggerConfig = FileLogger.Configuration.create();
+<pre class="d_code"><span class="d_keyword">void</span> main(string[] args)
+{
+    <span class="d_keyword">auto</span> loggerConfig = FileLogger.Configuration.create();
 
-  <span class="d_comment">// overwrite some default values
-</span>  loggerConfig.logDirectory = <span class="d_string">"/tmp/"</span> ~ args[0];
-  loggerConfig.<span class="d_psymbol">parseCommandLine</span>(args);
+    <span class="d_comment">// overwrite some default values
+</span>    loggerConfig.logDirectory = <span class="d_string">"/tmp/"</span> ~ args[0];
 
-  config.logger = <span class="d_keyword">new</span> <span class="d_keyword">shared</span>(FileLogger(loggerConfig));
+    <span class="d_comment">// Parse the command line
+</span>    loggerConfig.<span class="d_psymbol">parseCommandLine</span>(args);
+
+    config.logger = <span class="d_keyword">new</span> <span class="d_keyword">shared</span>(FileLogger(loggerConfig));
 }
 </pre>
-<p></p>
+           This example overwrites the default log directory and later
+           configures the file logger to any configuration option passed
+           through the command line.<p></p>
 
 </dd>
 <dt class="d_decl">@property string <a name="logToStderrFlag"></a><span class="ddoc_psymbol">logToStderrFlag</span>(string <a name="logToStderrFlag"></a><span class="ddoc_psymbol">logToStderrFlag</span>);
+<br>const const @property string <a name="logToStderrFlag"></a><span class="ddoc_psymbol">logToStderrFlag</span>();
 </dt>
 <dd>Command line flag for logging to stderr. The default value is
-         <span class="d_inlinecode">"logtostderr"</span> which at the command line is <i>--logtostderr</i>.<p></p>
+           <span class="d_inlinecode">"logtostderr"</span> which at the command line is <i>--logtostderr</i>.<p></p>
 
 </dd>
 <dt class="d_decl">@property string <a name="alsoLogToStderrFlag"></a><span class="ddoc_psymbol">alsoLogToStderrFlag</span>(string <a name="alsoLogToStderrFlag"></a><span class="ddoc_psymbol">alsoLogToStderrFlag</span>);
+<br>const const @property string <a name="alsoLogToStderrFlag"></a><span class="ddoc_psymbol">alsoLogToStderrFlag</span>();
 </dt>
 <dd>Command line flag for logging to stderr and files. The default value
-         is <span class="d_inlinecode">"alsologtostderr"</span> which at the command line is
-         <i>--alsologtostderr</i>.<p></p>
+           is <span class="d_inlinecode">"alsologtostderr"</span> which at the command line is
+           <i>--alsologtostderr</i>.<p></p>
 
 </dd>
 <dt class="d_decl">@property string <a name="stderrThresholdFlag"></a><span class="ddoc_psymbol">stderrThresholdFlag</span>(string <a name="stderrThresholdFlag"></a><span class="ddoc_psymbol">stderrThresholdFlag</span>);
+<br>const const @property string <a name="stderrThresholdFlag"></a><span class="ddoc_psymbol">stderrThresholdFlag</span>();
 </dt>
 <dd>Command line flag for setting the stderr logging threshold. The
-         default value is <span class="d_inlinecode">"stderrthreshold"</span> which at the command line is
-         <i>--stderrthreshold</i>.<p></p>
+           default value is <span class="d_inlinecode">"stderrthreshold"</span> which at the command line is
+           <i>--stderrthreshold</i>.<p></p>
 
 </dd>
 <dt class="d_decl">@property string <a name="logDirectoryFlag"></a><span class="ddoc_psymbol">logDirectoryFlag</span>(string <a name="logDirectoryFlag"></a><span class="ddoc_psymbol">logDirectoryFlag</span>);
+<br>const const @property string <a name="logDirectoryFlag"></a><span class="ddoc_psymbol">logDirectoryFlag</span>();
 </dt>
 <dd>Command line flag for setting the logging directory. The default
-         value is <span class="d_inlinecode">"logdir"</span> which at the command line is <i>--logdir</i>.<p></p>
+           value is <span class="d_inlinecode">"logdir"</span> which at the command line is <i>--logdir</i>.<p></p>
 
 </dd>
 <dt class="d_decl">static Configuration <a name="create"></a><span class="ddoc_psymbol">create</span>();
@@ -770,6 +785,7 @@ The function processes every entry in <i>commandLine</i> looking for valid
 
 </dd>
 <dt class="d_decl">@property string <a name="name"></a><span class="ddoc_psymbol">name</span>(string <a name="name"></a><span class="ddoc_psymbol">name</span>);
+<br>const const @property string <a name="name"></a><span class="ddoc_psymbol">name</span>();
 </dt>
 <dd>Name to use when generating log file names.
 <p></p>
@@ -780,7 +796,7 @@ The default value is the program name.<p></p>
 <br>const const @property bool <a name="logToStderr"></a><span class="ddoc_psymbol">logToStderr</span>();
 </dt>
 <dd>Specifies if the logger should write to stderr. If this property is
-         set, then it only logs to stderr and not to files.
+           set, then it only logs to stderr and not to files.
 <p></p>
 The default value is <b>false</b>.<p></p>
 
@@ -788,8 +804,8 @@ The default value is <b>false</b>.<p></p>
 <dt class="d_decl">@property bool <a name="alsoLogToStderr"></a><span class="ddoc_psymbol">alsoLogToStderr</span>(bool <a name="alsoLogToStderr"></a><span class="ddoc_psymbol">alsoLogToStderr</span>);
 <br>const const @property bool <a name="alsoLogToStderr"></a><span class="ddoc_psymbol">alsoLogToStderr</span>();
 </dt>
-<dd>Specifies if the logger should write to stderr. If this property is
-         set, then it logs to stderr and to files.
+<dd>Specifies if the logger should also write to stderr. If this
+           property is set, then it logs to stderr and to files.
 <p></p>
 The default value is <b>false</b>.<p></p>
 
@@ -798,8 +814,8 @@ The default value is <b>false</b>.<p></p>
 <br>const const @property Severity <a name="stderrThreshold"></a><span class="ddoc_psymbol">stderrThreshold</span>();
 </dt>
 <dd>Specifies the threshold at which log messages are logged to stderr.
-         Any message of higher or equal severity to <i>threshold</i> is written to
-         stderr.
+           Any message with a severity higher or equal to <i>threshold</i> is written
+           to stderr.
 <p></p>
 The default value is <span class="d_inlinecode">Severity.error</span>.<p></p>
 
@@ -810,9 +826,9 @@ The default value is <span class="d_inlinecode">Severity.error</span>.<p></p>
 <dd>Specifies the directory where log files are created.
 <p></p>
 The default value for this property is the value in the environment
-         variable <i>LOGDIR</i>. If <i>LOGDIR</i> is not set, then <i>TEST_TMPDIR</i>
-         is used. If <i>TEST_TMPDIR</i> is not set, then it logs to the current
-         directory.<p></p>
+           variable <i>LOGDIR</i>. If <i>LOGDIR</i> is not set, then
+           <i>TEST_TMPDIR</i> is used. If <i>TEST_TMPDIR</i> is not set, then it
+           logs to the current directory.<p></p>
 
 </dd>
 <dt class="d_decl">@property size_t <a name="bufferSize"></a><span class="ddoc_psymbol">bufferSize</span>(size_t <a name="bufferSize"></a><span class="ddoc_psymbol">bufferSize</span>);
@@ -824,66 +840,67 @@ The default value is 4KB.<p></p>
 
 </dd>
 <dt class="d_decl">@property string <a name="lineFormat"></a><span class="ddoc_psymbol">lineFormat</span>(string <i>format</i>);
-<br>@property string <a name="lineFormat"></a><span class="ddoc_psymbol">lineFormat</span>();
+<br>const const @property string <a name="lineFormat"></a><span class="ddoc_psymbol">lineFormat</span>();
 </dt>
 <dd>Specifies the format for every log line.
 <p></p>
 The attributes of a log line are logged by placing <i>%</i> directives
-         in the format string.
+           in the format string.
 <p></p>
 
-         <center><table cellspacing=0 cellpadding=5 class=book><caption>Directives are mapped to logging values as follow.</caption>            <tr><th>Directive</th>
-                 <th>Semantics</th></tr>
-            <tr><td valign=top>%%</td>
-                 <td valign=top>The percent sign.</td></tr>
-            <tr><td valign=top>%{...}t</td>
-                 <td valign=top>The time when the log line was generated.</td></tr>
-            <tr><td valign=top>%i</td>
-                 <td valign=top>The id of the thread which generated the log line.</td></tr>
-            <tr><td valign=top>%s</td>
-                 <td valign=top>The severity of the log line.</td></tr>
-            <tr><td valign=top>%f</td>
-                 <td valign=top>The name of the file which generated the log line.</td></tr>
-            <tr><td valign=top>%l</td>
-                 <td valign=top>The line number which generated the log line.</td></tr>
-            <tr><td valign=top>%m</td>
-                 <td valign=top>The log message.</td></tr></table></center>
+           <center><table cellspacing=0 cellpadding=5 class=book><caption>Directives are mapped to logging values as follow.</caption>              <tr><th>Directive</th>
+                   <th>Semantics</th></tr>
+              <tr><td valign=top>%%</td>
+                   <td valign=top>The percent sign.</td></tr>
+              <tr><td valign=top>%{...}t</td>
+                   <td valign=top>The time when the log line was generated.</td></tr>
+              <tr><td valign=top>%i</td>
+                   <td valign=top>The id of the thread which generated the log line.</td></tr>
+              <tr><td valign=top>%s</td>
+                   <td valign=top>The severity of the log line.</td></tr>
+              <tr><td valign=top>%f</td>
+                   <td valign=top>The name of the file which generated the log line.</td></tr>
+              <tr><td valign=top>%l</td>
+                   <td valign=top>The line number which generated the log line.</td></tr>
+              <tr><td valign=top>%m</td>
+                   <td valign=top>The log message.</td></tr></table></center>
 <p></p>
 
-         The directive <i>%t</i> is the same as <i>%{%m%d %H:%M:%S}t</i> as
-         described below.
+           The directive <i>%t</i> is the same as <i>%{%m%d %H:%M:%S}t</i> as
+           described below.
 <p></p>
 
-         <center><table cellspacing=0 cellpadding=5 class=book><caption>Directives inside the curly brackets in <i>%{...}t</i> are
-                      mapped as follows.</caption>            <tr><th>Directive</th>
-                 <th>Semantics</th></tr>
-            <tr><td valign=top>%%</td>
-                 <td valign=top>The percent sign.</td></tr>
-            <tr><td valign=top>%m</td>
-                 <td valign=top>The month as a decimal number.</td></tr>
-            <tr><td valign=top>%d</td>
-                 <td valign=top>The day of the month as a decimal number.</td></tr>
-            <tr><td valign=top>%Y</td>
-                 <td valign=top>The year as a decimal number including the century.</td></tr>
-            <tr><td valign=top>%H</td>
-                 <td valign=top>The hour as a decimal number using a 24-hour clock.</td></tr>
-            <tr><td valign=top>%M</td>
-                 <td valign=top>The minute as a decimal number.</td></tr>
-            <tr><td valign=top>%S</td>
-                 <td valign=top>The second as a decimal number.</td></tr></table></center>
+           <center><table cellspacing=0 cellpadding=5 class=book><caption>Directives inside the curly brackets in <i>%{...}t</i> are
+                        mapped as follows.</caption>              <tr><th>Directive</th>
+                   <th>Semantics</th></tr>
+              <tr><td valign=top>%%</td>
+                   <td valign=top>The percent sign.</td></tr>
+              <tr><td valign=top>%m</td>
+                   <td valign=top>The month as a decimal number.</td></tr>
+              <tr><td valign=top>%d</td>
+                   <td valign=top>The day of the month as a decimal number.</td></tr>
+              <tr><td valign=top>%Y</td>
+                   <td valign=top>The year as a decimal number including the century.</td></tr>
+              <tr><td valign=top>%H</td>
+                   <td valign=top>The hour as a decimal number using a 24-hour clock.</td></tr>
+              <tr><td valign=top>%M</td>
+                   <td valign=top>The minute as a decimal number.</td></tr>
+              <tr><td valign=top>%S</td>
+                   <td valign=top>The second as a decimal number.</td></tr></table></center>
 <p></p>
 
-         The default value is <span class="d_inlinecode">"%s%t %i %f:%l] %m"</span>.<p></p>
+           The default value is <span class="d_inlinecode">"%s%t %i %f:%l] %m"</span>.<p></p>
 
 </dd>
 <dt class="d_decl">@property dstring <a name="severitySymbols"></a><span class="ddoc_psymbol">severitySymbols</span>(dstring <i>symbols</i>);
-<br>@property dstring <a name="severitySymbols"></a><span class="ddoc_psymbol">severitySymbols</span>();
+<br>const const @property dstring <a name="severitySymbols"></a><span class="ddoc_psymbol">severitySymbols</span>();
 </dt>
-<dd>Specifies the symbols to use for each severities when writing to file.
+<dd>Specifies the symbols to use for each severities when writing to
+           file.
 <p></p>
 The value of the severities as define in <span class="d_inlinecode">Severity</span> is used to
-         index into the string. The length of the string must equal
-         <span class="d_inlinecode">Severity.max + 1</span>.
+           index into the string. The length of the string must equal
+           <span class="d_inlinecode">Severity.max + 1</span>.
 
 <p></p>
 <b>Example:</b><br>
@@ -892,35 +909,35 @@ loggerConfig.<span class="d_psymbol">severitySymbols</span> = <span class="d_str
 <span class="d_keyword">assert</span>(loggerConfig.<span class="d_psymbol">severitySymbols</span>[Severity.fatal] == '1');
 </pre>
 
-         The default value is <span class="d_inlinecode">"FCEWI"</span>.<p></p>
+           The default value is <span class="d_inlinecode">"FCEWI"</span>.<p></p>
 
 </dd>
 <dt class="d_decl">@property string[] <a name="fileNamePrefixes"></a><span class="ddoc_psymbol">fileNamePrefixes</span>(string[] <i>prefixes</i>);
-<br>@property string[] <a name="fileNamePrefixes"></a><span class="ddoc_psymbol">fileNamePrefixes</span>();
+<br>const const @property const(immutable(char)[][]) <a name="fileNamePrefixes"></a><span class="ddoc_psymbol">fileNamePrefixes</span>();
 </dt>
 <dd>Specifies the prefix for the name of the log files.
 <p></p>
 The parameter should either by <span class="d_inlinecode"><b>null</b></span> or be a length of
-         <span class="d_inlinecode">Severity.max + 1</span>.
+           <span class="d_inlinecode">Severity.max + 1</span>.
 <p></p>
 
-         If the value is not <b>null</b> the value stored in <i><i>prefixes</i>[i]</i> will be
-         used as the prefix for severity <i>i</i>, where <i>i</i> is a value
-         defined in <span class="d_inlinecode">Severity</span>. For example the file name for severity error
-         will have the prefix <span class="d_inlinecode"><a name="fileNamePrefixes"></a><span class="ddoc_psymbol">fileNamePrefixes</span>[Severity.error]</span>.  If an
-         entry in the array contains the empty string, then no log file is
-         created for that severity.
+           If the value is not <b>null</b> the value stored in <i><i>prefixes</i>[i]</i> will be
+           used as the prefix for severity <i>i</i>, where <i>i</i> is a value
+           defined in <span class="d_inlinecode">Severity</span>. For example the file name for severity
+           error will have the prefix <span class="d_inlinecode"><a name="fileNamePrefixes"></a><span class="ddoc_psymbol">fileNamePrefixes</span>[Severity.error]</span>. If
+           an entry in the array contains the empty string, then no log file is
+           created for that severity.
 <p></p>
 
-         If the value is <b>null</b> then log file names are
-         <i>[program].[hostname].[user].[severity].log.[datetime].[pid]</i>. For
-         example if the program is <i>hello</i>, the host name is
-         <i>example.com</i> and the user name is <i>guest</i> then the file name
-         for severity info will be:
-         <i>hello.example.com.guest.INFO.log.20110609T050018Z.743</i>.
+           If the value is <b>null</b> then log file names are
+           <i>[program].[hostname].[user].[severity].log.[datetime].[pid]</i>. For
+           example if the program is <i>hello</i>, the host name is
+           <i>example.com</i> and the user name is <i>guest</i> then the file name
+           for severity info will be:
+           <i>hello.example.com.guest.INFO.log.20110609T050018Z.743</i>.
 <p></p>
 
-         The default value is <span class="d_inlinecode"><b>null</b></span>.
+           The default value is <span class="d_inlinecode"><b>null</b></span>.
 
 <p></p>
 <b>Example:</b><br>
@@ -933,12 +950,12 @@ The parameter should either by <span class="d_inlinecode"><b>null</b></span> or 
   config.logger = <span class="d_keyword">new</span> <span class="d_keyword">shared</span>(FileLogger(loggerConfig));
 }
 </pre>
-         The example above will log every log message to one file with the
-         name <i>[program].log.[datetime].[pid]</i>.<p></p>
+           The example above will log every log message to one file with the
+           name <i>[program].log.[datetime].[pid]</i>.<p></p>
 
 </dd>
 <dt class="d_decl">@property string <a name="fileNameExtension"></a><span class="ddoc_psymbol">fileNameExtension</span>(string <i>extension</i>);
-<br>@property string <a name="fileNameExtension"></a><span class="ddoc_psymbol">fileNameExtension</span>();
+<br>const const @property string <a name="fileNameExtension"></a><span class="ddoc_psymbol">fileNameExtension</span>();
 </dt>
 <dd>Specifies the <i>extension</i> for the name of log files.
 <p></p>
@@ -972,31 +989,32 @@ The default value is <span class="d_inlinecode">".log"</span>.<p></p>
 </dt>
 <dd>Logs a message.
 <p></p>
-The method is called by <span class="d_inlinecode">std.log</span> whenever it decides that a message
-should be logged. It is not required that the implementation of this method do
-any filtering based on severity since at this point all configured filters were
-performed.
+The method is called by <span class="d_inlinecode">std.log</span> whenever it decides that a
+       message should be logged. It is not required that the implementation of
+       this method do any filtering based on severity since at this point all
+       configured filters were performed.
 <p></p>
 
-The method is allow to return immediately without persisting the message.<p></p>
+       The method is allow to return immediately without persisting the
+       message.<p></p>
 
 </dd>
 <dt class="d_decl">abstract shared void <a name="flush"></a><span class="ddoc_psymbol">flush</span>();
 </dt>
 <dd>Flushes pending log operations.
 <p></p>
-The method is called by <span class="d_inlinecode">std.log</span> whenever it requires the persistence of
-all the previous messages. For example the method is called when the client
-logs a fatal message.
+The method is called by <span class="d_inlinecode">std.log</span> whenever it requires the persistence
+       of all the previous messages. For example the method is called when the
+       client logs a fatal message.
 <p></p>
 
-The method must not return until all pending log operations complete.<p></p>
+       The method must not return until all pending log operations complete.<p></p>
 
 </dd>
 <dt class="d_decl">struct <a name="LogMessage"></a><span class="ddoc_psymbol">LogMessage</span>;
 </dt>
 <dd>Log message constructed by <span class="d_inlinecode">std.log</span> and passed to the <span class="d_inlinecode">Logger</span> for
-      recording.<p></p>
+       recording.<p></p>
 
 <dl><dt class="d_decl">string <a name="file"></a><span class="ddoc_psymbol">file</span>;
 </dt>
@@ -1049,20 +1067,20 @@ otherwise it returns <b>false</b>. The first call returns <b>true</b>.
 
 <span class="d_keyword">foreach</span>(i; 0 .. 10)
 {
-   <span class="d_keyword">if</span>(<span class="d_psymbol">every</span>(2)) firstCounter += i;
+    <span class="d_keyword">if</span>(<span class="d_psymbol">every</span>(2)) firstCounter += i;
 
-   <span class="d_keyword">if</span>(<span class="d_psymbol">every</span>(3)) secondCounter += i;
+    <span class="d_keyword">if</span>(<span class="d_psymbol">every</span>(3)) secondCounter += i;
 }
 <span class="d_keyword">assert</span>(firstCounter == 20); <span class="d_comment">// 0 + 2 + 4 + 6 + 8
 </span><span class="d_keyword">assert</span>(secondCounter == 18); <span class="d_comment">// 0 + 3 + 6 + 9
 </span>
 <span class="d_keyword">foreach</span>(i; 0 .. 3)
 {
-   <span class="d_keyword">if</span>(<span class="d_psymbol">every</span>(dur!<span class="d_string">"msecs"</span>(40))) <span class="d_keyword">assert</span>(i == 0 || i == 2);
-   Thread.sleep(dur!<span class="d_string">"msecs"</span>(21));
+    <span class="d_keyword">if</span>(<span class="d_psymbol">every</span>(dur!<span class="d_string">"msecs"</span>(40))) <span class="d_keyword">assert</span>(i == 0 || i == 2);
+    Thread.sleep(dur!<span class="d_string">"msecs"</span>(21));
 }
 </pre>
-The code above executes without asserting.<p></p>
+<p></p>
 
 </dd>
 <dt class="d_decl">Rich!(bool) <a name="first"></a><span class="ddoc_psymbol">first</span>(string file = __FILE__, int line = __LINE__)(uint <i>n</i> = 1);
@@ -1081,20 +1099,20 @@ first n unit of time at a specific call site; otherwise it returns <b>false</b>.
 
 <span class="d_keyword">foreach</span>(i; 0 .. 10)
 {
-   <span class="d_keyword">if</span>(<span class="d_psymbol">first</span>(2)) firstCounter += i;
+    <span class="d_keyword">if</span>(<span class="d_psymbol">first</span>(2)) firstCounter += i;
 
-   <span class="d_keyword">if</span>(<span class="d_psymbol">first</span>(3)) secondCounter += i;
+    <span class="d_keyword">if</span>(<span class="d_psymbol">first</span>(3)) secondCounter += i;
 }
 <span class="d_keyword">assert</span>(firstCounter == 1); <span class="d_comment">// 0 + 1
 </span><span class="d_keyword">assert</span>(secondCounter == 3); <span class="d_comment">// 0 + 1 + 2
 </span>
 <span class="d_keyword">foreach</span>(i; 0 .. 3)
 {
-  <span class="d_keyword">if</span>(<span class="d_psymbol">first</span>(dur!<span class="d_string">"msecs"</span>(40))) <span class="d_keyword">assert</span>(i == 0 || i == 1);
-  Thread.sleep(dur!<span class="d_string">"msecs"</span>(21));
+    <span class="d_keyword">if</span>(<span class="d_psymbol">first</span>(dur!<span class="d_string">"msecs"</span>(40))) <span class="d_keyword">assert</span>(i == 0 || i == 1);
+    Thread.sleep(dur!<span class="d_string">"msecs"</span>(21));
 }
 </pre>
-The code above executes without asserting.<p></p>
+<p></p>
 
 </dd>
 <dt class="d_decl">Rich!(bool) <a name="after"></a><span class="ddoc_psymbol">after</span>(string file = __FILE__, int line = __LINE__)(uint <i>n</i>);
@@ -1113,20 +1131,20 @@ passed since the first call at a specific call site.
 
 <span class="d_keyword">foreach</span>(i; 0 .. 10)
 {
-   <span class="d_keyword">if</span>(<span class="d_psymbol">after</span>(8)) firstCounter += i;
+    <span class="d_keyword">if</span>(<span class="d_psymbol">after</span>(8)) firstCounter += i;
 
-   <span class="d_keyword">if</span>(<span class="d_psymbol">after</span>(7)) secondCounter += i;
+    <span class="d_keyword">if</span>(<span class="d_psymbol">after</span>(7)) secondCounter += i;
 }
 <span class="d_keyword">assert</span>(firstCounter == 17); <span class="d_comment">// 8 + 9
 </span><span class="d_keyword">assert</span>(secondCounter == 24); <span class="d_comment">// 7 + 8 + 9
 </span>
 <span class="d_keyword">foreach</span>(i; 0 .. 3)
 {
-   <span class="d_keyword">if</span>(<span class="d_psymbol">after</span>(dur!<span class="d_string">"msecs"</span>(40))) <span class="d_keyword">assert</span>(i == 2);
-   Thread.sleep(dur!<span class="d_string">"msecs"</span>(21));
+    <span class="d_keyword">if</span>(<span class="d_psymbol">after</span>(dur!<span class="d_string">"msecs"</span>(40))) <span class="d_keyword">assert</span>(i == 2);
+    Thread.sleep(dur!<span class="d_string">"msecs"</span>(21));
 }
 </pre>
-The code above executes without asserting.<p></p>
+<p></p>
 
 </dd>
 <dt class="d_decl">template <a name="rich"></a><span class="ddoc_psymbol">rich</span>(string exp) if (isBinaryOp(exp))<br>template <a name="rich"></a><span class="ddoc_psymbol">rich</span>(string exp) if (exp == "!")<br>struct <a name="Rich"></a><span class="ddoc_psymbol">Rich</span>(Type) if (is(Type == bool));
